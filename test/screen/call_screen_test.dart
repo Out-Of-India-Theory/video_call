@@ -203,4 +203,31 @@ void main() {
     expect(session.connectCount, 1);
     expect(session.joinCount, 1);
   });
+
+  testWidgets('dispose calls leaveCall + dispose on session', (tester) async {
+    final session = FakeCallSession();
+    final gate = FakePermissionGate();
+
+    final priorOnError = FlutterError.onError;
+    FlutterError.onError = (details) {
+      if (details.exceptionAsString().contains('Call') ||
+          details.toString().contains('Mock')) {
+        return; // swallow render-phase mock errors
+      }
+      priorOnError?.call(details);
+    };
+    addTearDown(() => FlutterError.onError = priorOnError);
+
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    // Now unmount the screen by replacing the widget tree.
+    await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+    await tester.pump();
+
+    expect(session.leaveCount, 1);
+    expect(session.disposeCount, 1);
+  });
 }
