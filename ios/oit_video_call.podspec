@@ -4,14 +4,14 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'oit_video_call'
-  s.version          = '0.0.1'
-  s.summary          = 'A new Flutter plugin project.'
+  s.version          = '1.0.0'
+  s.summary          = 'OIT shared Flutter plugin wrapping Stream Video for Dharmayana apps.'
   s.description      = <<-DESC
-A new Flutter plugin project.
+OIT shared Flutter plugin wrapping Stream Video for Dharmayana apps.
                        DESC
-  s.homepage         = 'http://example.com'
+  s.homepage         = 'https://github.com/Out-Of-India-Theory/video_call'
   s.license          = { :file => '../LICENSE' }
-  s.author           = { 'Your Company' => 'email@example.com' }
+  s.author           = { 'Out of India Theory' => 'engineering@the-oit.in' }
   s.source           = { :path => '.' }
   s.source_files = 'Classes/**/*'
   s.dependency 'Flutter'
