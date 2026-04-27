@@ -169,4 +169,14 @@ void main() {
 
     expect(find.textContaining('load call'), findsOneWidget);
   });
+
+  testWidgets('phase 5: joinCall throws → joinFailed', (tester) async {
+    final session = FakeCallSession()..joinError = Exception('rtc fail');
+    final gate = FakePermissionGate();
+
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('join'), findsOneWidget);
+  });
 }
