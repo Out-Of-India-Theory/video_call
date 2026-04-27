@@ -1,6 +1,8 @@
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'config.dart';
+import 'errors.dart';
 import 'models/video_user.dart';
+import 'screen/error_view.dart';
 
 class OitVideoCall {
   OitVideoCall._();
@@ -40,6 +42,18 @@ class OitVideoCall {
     String callType = 'default',
     VoidCallback? onCallEnded,
   }) {
-    throw UnimplementedError('Wired in Task 11');
+    if (_config == null) {
+      return const Scaffold(
+        body: ErrorView(
+          code: OitVideoCallErrorCode.notInitialized,
+          message:
+              'OitVideoCall is not initialized. Call OitVideoCall.init() first.',
+        ),
+      );
+    }
+    // Real screen wired in Task 27.
+    return const Scaffold(
+      body: Center(child: Text('CallScreen placeholder — wired in Task 27')),
+    );
   }
 }
