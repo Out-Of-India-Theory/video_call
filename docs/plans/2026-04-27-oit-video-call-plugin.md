@@ -8,7 +8,7 @@
 
 **Architecture:** Pure facade plugin. `OitVideoCall.init(...)` stores config (no network). `OitVideoCall.callScreen(callId, audioOnly)` returns a self-contained widget that walks a 5-phase setup (permissions → token → StreamVideo construct → call.get → call.join), then renders Stream's pre-built `StreamCallContainer`. Lifecycle is screen-scoped: WebSocket opens on mount, tears down on dispose. Internal `_CallSession` abstraction allows full unit testing without a Stream backend.
 
-**Tech Stack:** Flutter (Dart 3.8+), `stream_video_flutter ^1.3.2`, `permission_handler ^11.3.1`, `app_settings`, `mocktail` for tests.
+**Tech Stack:** Flutter (Dart 3.8+), `stream_video_flutter ^1.3.2`, `permission_handler ^12.0.1` (forced by Stream's transitive constraint), `app_settings`, `mocktail` for tests.
 
 **Reference:** [Approved design doc](./2026-04-27-oit-video-call-plugin-design.md) — read this first if any task feels ambiguous.
 
@@ -81,7 +81,7 @@ dependencies:
   flutter:
     sdk: flutter
   stream_video_flutter: ^1.3.2
-  permission_handler: ^11.3.1
+  permission_handler: ^12.0.1
   app_settings:
     git:
       url: https://github.com/spencerccf/app_settings.git
@@ -111,9 +111,11 @@ Expected: "Got dependencies!" with no errors.
 **Step 3: Commit**
 
 ```bash
-git add pubspec.yaml pubspec.lock
+git add pubspec.yaml
 git commit -m "chore: configure plugin pubspec with stream_video_flutter and deps"
 ```
+
+> Note: `pubspec.lock` is gitignored for libraries (Dart convention) — do not stage it.
 
 ---
 
