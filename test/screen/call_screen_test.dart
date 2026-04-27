@@ -50,4 +50,17 @@ void main() {
     expect(find.text('Retry'), findsOneWidget);
     expect(find.text('Open Settings'), findsNothing);
   });
+
+  testWidgets('phase 1: permanently denied → Open Settings shown', (tester) async {
+    final session = FakeCallSession();
+    final gate = FakePermissionGate()
+      ..result = const PermissionResult(granted: false, permanentlyDenied: true);
+
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('permanently'), findsOneWidget);
+    expect(find.text('Open Settings'), findsOneWidget);
+    expect(find.text('Retry'), findsNothing);
+  });
 }
