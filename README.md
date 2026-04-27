@@ -1,15 +1,12 @@
 # oit_video_call
 
-A new Flutter plugin project.
+OIT shared Flutter plugin wrapping [Stream Video](https://getstream.io/video/)
+for the Dharmayana apps. Provides 1:1 audio + video consultations against a
+backend-provided call ID.
 
-## Getting Started
-
-This project is a starting point for a Flutter
-[plug-in package](https://flutter.dev/to/develop-plugins),
-a specialized package that includes platform-specific implementation code for
-Android and/or iOS.
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
-
+> Status: in development (`release/1.0.0` branch). Full integration guide
+> will land with the v1.0.0 tag — see
+> [`docs/plans/2026-04-27-oit-video-call-plugin-design.md`](docs/plans/2026-04-27-oit-video-call-plugin-design.md)
+> for the approved design and
+> [`docs/plans/2026-04-27-oit-video-call-plugin.md`](docs/plans/2026-04-27-oit-video-call-plugin.md)
+> for the implementation plan.
