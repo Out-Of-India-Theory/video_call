@@ -47,9 +47,7 @@ class _Errored extends _Phase {
   _Errored(
     this.code,
     this.message, {
-    // ignore: unused_element_parameter — used in Task 16's _start().
     this.canRetry = true,
-    // ignore: unused_element_parameter — used in Task 16's _start().
     this.canOpenSettings = false,
   });
 
@@ -67,7 +65,6 @@ class _Ready extends _Phase {
 
 class _CallScreenState extends State<CallScreen> {
   late final CallSession _session;
-  // ignore: unused_field — read by Task 16's _start() lifecycle.
   late final PermissionGate _gate;
   late final Future<bool> Function() _openSettings;
   Call? _call;
@@ -83,7 +80,103 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   Future<void> _start() async {
-    // Implemented in Task 16.
+    // Phase 1: permissions
+    final perm = await _gate.request(includeCamera: !widget.audioOnly);
+    if (!mounted) return;
+    if (!perm.granted) {
+      setState(
+        () => _phase = _Errored(
+          OitVideoCallErrorCode.permissionDenied,
+          perm.permanentlyDenied
+              ? 'Permission permanently denied. Open settings to grant.'
+              : 'Camera and microphone are required.',
+          canRetry: !perm.permanentlyDenied,
+          canOpenSettings: perm.permanentlyDenied,
+        ),
+      );
+      return;
+    }
+
+    // Phase 2: token
+    final String token;
+    try {
+      token = await widget.config.tokenProvider();
+    } catch (_) {
+      if (!mounted) return;
+      setState(
+        () => _phase = _Errored(
+          OitVideoCallErrorCode.tokenFetchFailed,
+          'Could not fetch call token.',
+        ),
+      );
+      return;
+    }
+
+    // Phase 3: connect
+    try {
+      final user = User.regular(
+        userId: widget.config.user.id,
+        name: widget.config.user.name,
+        image: widget.config.user.image,
+      );
+      await _session.connect(
+        apiKey: widget.config.apiKey,
+        user: user,
+        token: token,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(
+        () => _phase = _Errored(
+          OitVideoCallErrorCode.joinFailed,
+          'Could not connect to call service.',
+        ),
+      );
+      return;
+    }
+
+    // Phase 4: get call (no create)
+    final Call call;
+    try {
+      call = await _session.getCall(
+        callType: widget.callType,
+        callId: widget.callId,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      final lower = e.toString().toLowerCase();
+      final notFound = lower.contains('not') && lower.contains('found');
+      setState(
+        () => _phase = _Errored(
+          notFound
+              ? OitVideoCallErrorCode.callNotFound
+              : OitVideoCallErrorCode.joinFailed,
+          notFound ? 'Call not available.' : 'Could not load call.',
+        ),
+      );
+      return;
+    }
+
+    // Phase 5: join
+    try {
+      await _session.joinCall(call);
+      if (widget.audioOnly) {
+        await _session.setCameraEnabled(call, false);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(
+        () => _phase = _Errored(
+          OitVideoCallErrorCode.joinFailed,
+          'Could not join call.',
+        ),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    _call = call;
+    setState(() => _phase = _Ready(call));
   }
 
   @override
