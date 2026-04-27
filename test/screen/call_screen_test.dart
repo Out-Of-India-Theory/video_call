@@ -179,4 +179,28 @@ void main() {
 
     expect(find.textContaining('join'), findsOneWidget);
   });
+
+  testWidgets('happy path: connect + join called once each', (tester) async {
+    final session = FakeCallSession();
+    final gate = FakePermissionGate();
+
+    final priorOnError = FlutterError.onError;
+    FlutterError.onError = (details) {
+      if (details.exceptionAsString().contains('Call') ||
+          details.toString().contains('Mock')) {
+        return; // swallow render-phase mock errors
+      }
+      priorOnError?.call(details);
+    };
+    addTearDown(() => FlutterError.onError = priorOnError);
+
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
+    // Don't pumpAndSettle — _Ready triggers StreamCallContainer with a Mock Call.
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    expect(session.connectCount, 1);
+    expect(session.joinCount, 1);
+  });
 }
