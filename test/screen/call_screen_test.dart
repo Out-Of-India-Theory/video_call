@@ -149,4 +149,24 @@ void main() {
     expect(find.textContaining('connect'), findsOneWidget);
     expect(find.text('Retry'), findsOneWidget);
   });
+
+  testWidgets('phase 4: getCall not found → callNotFound', (tester) async {
+    final session = FakeCallSession()..getCallNotFound = true;
+    final gate = FakePermissionGate();
+
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('not available'), findsOneWidget);
+  });
+
+  testWidgets('phase 4: getCall throws other error → joinFailed', (tester) async {
+    final session = FakeCallSession()..getCallError = Exception('boom');
+    final gate = FakePermissionGate();
+
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('load call'), findsOneWidget);
+  });
 }
