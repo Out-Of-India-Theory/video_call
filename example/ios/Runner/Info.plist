@@ -66,5 +66,9 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Used for video consultations.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Used for audio during consultations.</string>
 </dict>
 </plist>
