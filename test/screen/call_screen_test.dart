@@ -138,4 +138,15 @@ void main() {
     expect(find.textContaining('token'), findsOneWidget);
     expect(find.text('Retry'), findsOneWidget);
   });
+
+  testWidgets('phase 3: session.connect throws → joinFailed', (tester) async {
+    final session = FakeCallSession()..connectError = Exception('boom');
+    final gate = FakePermissionGate();
+
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('connect'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+  });
 }
