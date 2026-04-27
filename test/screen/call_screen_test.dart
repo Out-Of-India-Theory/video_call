@@ -123,4 +123,19 @@ void main() {
     expect(gate.lastIncludeCamera, true);
     expect(session.cameraEnabledCalls, isEmpty);
   });
+
+  testWidgets('phase 2: tokenProvider throws → tokenFetchFailed error', (tester) async {
+    final session = FakeCallSession();
+    final gate = FakePermissionGate();
+
+    await tester.pumpWidget(_host(
+      config: _config(tokenProvider: () => Future.error(Exception('500'))),
+      session: session,
+      gate: gate,
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('token'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+  });
 }
