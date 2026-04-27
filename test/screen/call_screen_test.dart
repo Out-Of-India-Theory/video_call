@@ -230,4 +230,37 @@ void main() {
     expect(session.leaveCount, 1);
     expect(session.disposeCount, 1);
   });
+
+  testWidgets('Retry re-runs phases', (tester) async {
+    final session = FakeCallSession()..connectError = Exception('boom');
+    final gate = FakePermissionGate();
+
+    final priorOnError = FlutterError.onError;
+    FlutterError.onError = (details) {
+      if (details.exceptionAsString().contains('Call') ||
+          details.toString().contains('Mock')) {
+        return; // swallow render-phase mock errors
+      }
+      priorOnError?.call(details);
+    };
+    addTearDown(() => FlutterError.onError = priorOnError);
+
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
+    await tester.pumpAndSettle();
+
+    // First attempt failed at phase 3.
+    expect(find.text('Retry'), findsOneWidget);
+    expect(session.connectCount, 1);
+
+    // Clear the error and retry.
+    session.connectError = null;
+
+    await tester.tap(find.text('Retry'));
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    expect(session.connectCount, 2);
+    expect(session.joinCount, 1);
+  });
 }
