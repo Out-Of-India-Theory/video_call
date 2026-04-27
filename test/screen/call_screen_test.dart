@@ -63,4 +63,64 @@ void main() {
     expect(find.text('Open Settings'), findsOneWidget);
     expect(find.text('Retry'), findsNothing);
   });
+
+  testWidgets('audioOnly skips camera permission', (tester) async {
+    final session = FakeCallSession();
+    final gate = FakePermissionGate();
+
+    final priorOnError = FlutterError.onError;
+    FlutterError.onError = (details) {
+      if (details.exceptionAsString().contains('Call') ||
+          details.toString().contains('Mock')) {
+        return; // swallow render-phase mock errors
+      }
+      priorOnError?.call(details);
+    };
+    addTearDown(() => FlutterError.onError = priorOnError);
+
+    await tester.pumpWidget(_host(
+      config: _config(),
+      session: session,
+      gate: gate,
+      audioOnly: true,
+    ));
+    // Don't pumpAndSettle — _Ready triggers StreamCallContainer which will
+    // invoke mocked Call methods and throw. Pump just enough for the async
+    // phase chain to complete.
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    expect(gate.lastIncludeCamera, false);
+    // Audio-only also means setCameraEnabled(false) post-join
+    expect(session.cameraEnabledCalls, contains(false));
+  });
+
+  testWidgets('video call requests camera permission', (tester) async {
+    final session = FakeCallSession();
+    final gate = FakePermissionGate();
+
+    final priorOnError = FlutterError.onError;
+    FlutterError.onError = (details) {
+      if (details.exceptionAsString().contains('Call') ||
+          details.toString().contains('Mock')) {
+        return; // swallow render-phase mock errors
+      }
+      priorOnError?.call(details);
+    };
+    addTearDown(() => FlutterError.onError = priorOnError);
+
+    await tester.pumpWidget(_host(
+      config: _config(),
+      session: session,
+      gate: gate,
+      audioOnly: false,
+    ));
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    expect(gate.lastIncludeCamera, true);
+    expect(session.cameraEnabledCalls, isEmpty);
+  });
 }
