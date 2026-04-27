@@ -2,6 +2,8 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
+**Branch:** `release/1.0.0` — first release tagged `v1.0.0`.
+
 **Goal:** Build `oit_video_call`, a shared Flutter plugin that wraps `stream_video_flutter` and ships a single import surface for both `dharmayana_app` and `dharmayana_mitra_app` to add 1:1 audio/video consultations.
 
 **Architecture:** Pure facade plugin. `OitVideoCall.init(...)` stores config (no network). `OitVideoCall.callScreen(callId, audioOnly)` returns a self-contained widget that walks a 5-phase setup (permissions → token → StreamVideo construct → call.get → call.join), then renders Stream's pre-built `StreamCallContainer`. Lifecycle is screen-scoped: WebSocket opens on mount, tears down on dispose. Internal `_CallSession` abstraction allows full unit testing without a Stream backend.
@@ -68,7 +70,7 @@ Replace entire file contents with:
 ```yaml
 name: oit_video_call
 description: OIT shared Flutter plugin wrapping Stream Video for Dharmayana apps.
-version: 0.1.0
+version: 1.0.0
 publish_to: 'none'
 
 environment:
@@ -261,7 +263,7 @@ EOF
 ```markdown
 # Changelog
 
-## 0.1.0 — Unreleased
+## 1.0.0 — Unreleased
 
 - Initial release.
 - 1:1 audio + video calling against an existing Stream call ID.
@@ -2089,7 +2091,7 @@ dependencies:
   oit_video_call:
     git:
       url: https://github.com/Out-Of-India-Theory/video_call.git
-      ref: v0.1.0   # always pin a tag, not a branch
+      ref: v1.0.0   # always pin a tag, not a branch
 ```
 
 ## iOS configuration
@@ -2174,7 +2176,7 @@ The `example/` app provides a smoke-test harness. Copy `.env.example` to
 
 ## Versioning
 
-Semver tags (`v0.1.0`, `v0.1.1`, …). Always pin a tag in host apps.
+Semver tags (`v1.0.0`, `v1.0.1`, …). Always pin a tag in host apps.
 ```
 
 **Step 2: Commit**
@@ -2206,21 +2208,21 @@ Expected: no issues.
 Run: `git status`
 Expected: nothing to commit.
 
-**Step 4: Tag v0.1.0**
+**Step 4: Tag v1.0.0**
 
 ```bash
-git tag -a v0.1.0 -m "v0.1.0 — initial plugin release"
+git tag -a v1.0.0 -m "v1.0.0 — initial plugin release"
 git tag --list
 ```
 
-> **Note:** Do NOT push the tag yet — surface the result to the user and let them push when ready: `git push -u origin master && git push origin v0.1.0`.
+> **Note:** Do NOT push the tag yet. After the user merges `release/1.0.0` → `master`, tagging happens on master with `git push -u origin master && git push origin v1.0.0`.
 
 **Step 5: Final summary to user**
 
 Report:
 - Tasks completed: 31
 - Tests: N passing
-- Pending push: yes (master + v0.1.0)
+- Pending push: yes (release/1.0.0 + v1.0.0 tag)
 - Smoke test: still pending — example app needs a real Stream API key + JWT.
 
 ---
