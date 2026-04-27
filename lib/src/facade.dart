@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'config.dart';
 import 'errors.dart';
 import 'models/video_user.dart';
+import 'screen/call_screen.dart';
 import 'screen/error_view.dart';
 
 class OitVideoCall {
@@ -51,9 +52,12 @@ class OitVideoCall {
         ),
       );
     }
-    // Real screen wired in Task 27.
-    return const Scaffold(
-      body: Center(child: Text('CallScreen placeholder — wired in Task 27')),
+    return CallScreen(
+      config: _config!,
+      callId: callId,
+      callType: callType,
+      audioOnly: audioOnly,
+      onCallEnded: onCallEnded,
     );
   }
 }
