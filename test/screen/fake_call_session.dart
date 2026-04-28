@@ -13,7 +13,9 @@ class FakeCallSession implements CallSession {
   Object? getCallError;
 
   /// Simulates a 404 from `call.get()` (call does not exist on the
-  /// coordinator). Tests check this via [isCallNotFoundError].
+  /// coordinator). Throws the same [CallNotFoundError] the real session
+  /// would throw, so the screen exercises the same `on CallNotFoundError`
+  /// branch in production and tests.
   bool getCallNotFound = false;
 
   Object? joinError;
@@ -43,7 +45,7 @@ class FakeCallSession implements CallSession {
     required String callId,
   }) async {
     if (getCallNotFound) {
-      throw const _CallNotFoundError();
+      throw const CallNotFoundError();
     }
     if (getCallError != null) throw getCallError!;
     _call = _FakeCall();
@@ -71,17 +73,6 @@ class FakeCallSession implements CallSession {
     disposeCount++;
   }
 }
-
-class _CallNotFoundError implements Exception {
-  const _CallNotFoundError();
-
-  @override
-  String toString() => 'CallNotFound';
-}
-
-/// Returns true if [e] is the sentinel error that [FakeCallSession] throws
-/// when [FakeCallSession.getCallNotFound] is set.
-bool isCallNotFoundError(Object e) => e is _CallNotFoundError;
 
 /// Minimal `Call` sentinel used purely as a typed value passed back to the
 /// screen. The screen is not expected to invoke any methods on this object

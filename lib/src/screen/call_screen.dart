@@ -143,16 +143,21 @@ class _CallScreenState extends State<CallScreen> {
         callType: widget.callType,
         callId: widget.callId,
       );
-    } catch (e) {
+    } on CallNotFoundError {
       if (!mounted) return;
-      final lower = e.toString().toLowerCase();
-      final notFound = lower.contains('not') && lower.contains('found');
       setState(
         () => _phase = _Errored(
-          notFound
-              ? OitVideoCallErrorCode.callNotFound
-              : OitVideoCallErrorCode.joinFailed,
-          notFound ? 'Call not available.' : 'Could not load call.',
+          OitVideoCallErrorCode.callNotFound,
+          'Call not available.',
+        ),
+      );
+      return;
+    } catch (_) {
+      if (!mounted) return;
+      setState(
+        () => _phase = _Errored(
+          OitVideoCallErrorCode.joinFailed,
+          'Could not load call.',
         ),
       );
       return;

@@ -1,5 +1,15 @@
 import 'package:stream_video_flutter/stream_video_flutter.dart';
 
+/// Thrown by [CallSession.getCall] when the backend returns 404 for the
+/// requested call id. The screen treats this distinctly from other errors
+/// so it can show a "Call not available" message instead of a generic one.
+class CallNotFoundError implements Exception {
+  const CallNotFoundError();
+
+  @override
+  String toString() => 'CallNotFoundError';
+}
+
 /// Abstraction over the Stream API surface our screen uses.
 ///
 /// The real implementation wraps `package:stream_video`; the test fake
@@ -50,9 +60,25 @@ class StreamCallSession implements CallSession {
     final result = await call.get();
     if (result.isFailure) {
       final failure = result as Failure;
+      if (_isHttpNotFound(failure.error)) {
+        throw const CallNotFoundError();
+      }
       throw Exception('call.get() failed: ${failure.error}');
     }
     return call;
+  }
+
+  /// Detects an HTTP 404 inside a [VideoError] without depending on
+  /// stream_video's private `VideoErrorWithCause` symbol. The error's
+  /// `cause` field — when present — wraps the underlying [ApiException]
+  /// from the OpenAPI client; its `code` is the HTTP status.
+  static bool _isHttpNotFound(Object error) {
+    try {
+      final cause = (error as dynamic).cause;
+      return cause is ApiException && cause.code == 404;
+    } catch (_) {
+      return false;
+    }
   }
 
   @override
