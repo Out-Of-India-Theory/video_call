@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:stream_video_flutter/stream_video_flutter.dart' show StreamVideo;
 import 'config.dart';
 import 'errors.dart';
 import 'models/video_user.dart';
@@ -34,6 +35,7 @@ class OitVideoCall {
 
   static Future<void> reset() async {
     _config = null;
+    await StreamVideo.reset();
   }
 
   // callScreen() is added in Task 11.
