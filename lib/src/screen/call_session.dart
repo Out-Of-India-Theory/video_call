@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
 
 /// Thrown by [CallSession.getCall] when the backend returns 404 for the
@@ -60,25 +61,12 @@ class StreamCallSession implements CallSession {
     final result = await call.get();
     if (result.isFailure) {
       final failure = result as Failure;
-      if (_isHttpNotFound(failure.error)) {
+      if (isHttpNotFoundError(failure.error)) {
         throw const CallNotFoundError();
       }
       throw Exception('call.get() failed: ${failure.error}');
     }
     return call;
-  }
-
-  /// Detects an HTTP 404 inside a [VideoError] without depending on
-  /// stream_video's private `VideoErrorWithCause` symbol. The error's
-  /// `cause` field — when present — wraps the underlying [ApiException]
-  /// from the OpenAPI client; its `code` is the HTTP status.
-  static bool _isHttpNotFound(Object error) {
-    try {
-      final cause = (error as dynamic).cause;
-      return cause is ApiException && cause.code == 404;
-    } catch (_) {
-      return false;
-    }
   }
 
   @override
@@ -103,5 +91,26 @@ class StreamCallSession implements CallSession {
   @override
   Future<void> dispose() async {
     await StreamVideo.reset();
+  }
+}
+
+/// Detects whether the failure raised by `call.get()` corresponds to an
+/// HTTP 404 (call does not exist).
+///
+/// Implementation note: `stream_video` does not export
+/// `VideoErrorWithCause`, so we cannot do a direct `is` check. We rely on
+/// the documented field shape — `VideoErrorWithCause.cause` is an
+/// `ApiException` whose `code` is the HTTP status — and access it via a
+/// `dynamic` cast guarded by try/catch. If a future `stream_video` upgrade
+/// changes that contract, this returns `false` instead of misclassifying
+/// other failures as 404 — and the unit tests in
+/// `test/screen/call_session_test.dart` will fail, surfacing the change.
+@visibleForTesting
+bool isHttpNotFoundError(Object error) {
+  try {
+    final cause = (error as dynamic).cause;
+    return cause is ApiException && cause.code == 404;
+  } catch (_) {
+    return false;
   }
 }
