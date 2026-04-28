@@ -20,11 +20,11 @@ class OitVideoCall {
     return c;
   }
 
-  static Future<void> init({
+  static void init({
     required String apiKey,
     required VideoUser user,
     required TokenProvider tokenProvider,
-  }) async {
+  }) {
     _config = OitVideoCallConfig(
       apiKey: apiKey,
       user: user,

@@ -13,8 +13,8 @@ void main() {
       expect(OitVideoCall.isInitialized, isFalse);
     });
 
-    test('isInitialized becomes true after init', () async {
-      await OitVideoCall.init(
+    test('isInitialized becomes true after init', () {
+      OitVideoCall.init(
         apiKey: 'key',
         user: const VideoUser(id: 'u1', name: 'Foo'),
         tokenProvider: () async => 'jwt',
@@ -23,7 +23,7 @@ void main() {
     });
 
     test('reset clears initialization', () async {
-      await OitVideoCall.init(
+      OitVideoCall.init(
         apiKey: 'key',
         user: const VideoUser(id: 'u1', name: 'Foo'),
         tokenProvider: () async => 'jwt',
@@ -32,13 +32,13 @@ void main() {
       expect(OitVideoCall.isInitialized, isFalse);
     });
 
-    test('init can be called twice (idempotent replace)', () async {
-      await OitVideoCall.init(
+    test('init can be called twice (idempotent replace)', () {
+      OitVideoCall.init(
         apiKey: 'k1',
         user: const VideoUser(id: 'u1', name: 'A'),
         tokenProvider: () async => 't1',
       );
-      await OitVideoCall.init(
+      OitVideoCall.init(
         apiKey: 'k2',
         user: const VideoUser(id: 'u2', name: 'B'),
         tokenProvider: () async => 't2',

@@ -45,7 +45,7 @@ class _HomePageState extends State<HomePage> {
     }
 
     if (!_initialized) {
-      await OitVideoCall.init(
+      OitVideoCall.init(
         apiKey: apiKey,
         user: VideoUser(id: _userIdCtrl.text, name: _userNameCtrl.text),
         tokenProvider: () async => demoToken,
