@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
 import '../config.dart';
 import '../errors.dart';
@@ -75,7 +76,7 @@ class _CallScreenState extends State<CallScreen> {
     super.initState();
     _session = widget.deps?.session ?? StreamCallSession();
     _gate = widget.deps?.permissionGate ?? RealPermissionGate();
-    _openSettings = widget.deps?.openSettings ?? () => Future.value(false);
+    _openSettings = widget.deps?.openSettings ?? openAppSettings;
     _start();
   }
 
