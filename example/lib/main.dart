@@ -28,6 +28,14 @@ class _HomePageState extends State<HomePage> {
   bool _audioOnly = false;
   bool _initialized = false;
 
+  @override
+  void dispose() {
+    _userIdCtrl.dispose();
+    _userNameCtrl.dispose();
+    _callIdCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _initAndJoin() async {
     final apiKey = dotenv.env['STREAM_API_KEY'];
     final demoToken = dotenv.env['STREAM_DEMO_TOKEN'];
