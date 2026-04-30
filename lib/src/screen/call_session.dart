@@ -75,7 +75,10 @@ class StreamCallSession implements CallSession {
   }
 
   @override
-  Future<Call> getOrCreateCall({required String callType, required String callId}) async {
+  Future<Call> getOrCreateCall({
+    required String callType,
+    required String callId,
+  }) async {
     final call = StreamVideo.instance.makeCall(
       callType: StreamCallType.fromString(callType),
       id: callId,

@@ -58,7 +58,10 @@ class FakeCallSession implements CallSession {
   }
 
   @override
-  Future<Call> getOrCreateCall({required String callType, required String callId}) async {
+  Future<Call> getOrCreateCall({
+    required String callType,
+    required String callId,
+  }) async {
     getOrCreateCount++;
     if (getOrCreateError != null) throw getOrCreateError!;
     _call = _FakeCall();
