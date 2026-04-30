@@ -18,10 +18,14 @@ class FakeCallSession implements CallSession {
   /// branch in production and tests.
   bool getCallNotFound = false;
 
+  Object? getOrCreateError;
+
   Object? joinError;
 
   // Observable state.
   int connectCount = 0;
+  int getCallCount = 0;
+  int getOrCreateCount = 0;
   int joinCount = 0;
   int leaveCount = 0;
   int disposeCount = 0;
@@ -44,10 +48,22 @@ class FakeCallSession implements CallSession {
     required String callType,
     required String callId,
   }) async {
+    getCallCount++;
     if (getCallNotFound) {
       throw const CallNotFoundError();
     }
     if (getCallError != null) throw getCallError!;
+    _call = _FakeCall();
+    return _call!;
+  }
+
+  @override
+  Future<Call> getOrCreateCall({
+    required String callType,
+    required String callId,
+  }) async {
+    getOrCreateCount++;
+    if (getOrCreateError != null) throw getOrCreateError!;
     _call = _FakeCall();
     return _call!;
   }

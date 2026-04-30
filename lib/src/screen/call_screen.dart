@@ -23,6 +23,7 @@ class CallScreen extends StatefulWidget {
     required this.callId,
     required this.callType,
     required this.audioOnly,
+    this.createIfMissing = false,
     this.onCallEnded,
     @visibleForTesting this.deps,
   });
@@ -31,6 +32,7 @@ class CallScreen extends StatefulWidget {
   final String callId;
   final String callType;
   final bool audioOnly;
+  final bool createIfMissing;
   final VoidCallback? onCallEnded;
 
   @visibleForTesting
@@ -136,13 +138,14 @@ class _CallScreenState extends State<CallScreen> {
       return;
     }
 
-    // Phase 4: get call (no create)
+    // Phase 4: get call (no create) — or get-or-create if requested
     final Call call;
     try {
-      call = await _session.getCall(
-        callType: widget.callType,
-        callId: widget.callId,
-      );
+      call = widget.createIfMissing
+          ? await _session.getOrCreateCall(
+              callType: widget.callType, callId: widget.callId)
+          : await _session.getCall(
+              callType: widget.callType, callId: widget.callId);
     } on CallNotFoundError {
       if (!mounted) return;
       setState(
@@ -157,7 +160,9 @@ class _CallScreenState extends State<CallScreen> {
       setState(
         () => _phase = _Errored(
           OitVideoCallErrorCode.joinFailed,
-          'Could not load call.',
+          widget.createIfMissing
+              ? 'Could not start call.'
+              : 'Could not load call.',
         ),
       );
       return;

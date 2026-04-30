@@ -42,6 +42,7 @@ class OitVideoCall {
   static Widget callScreen({
     required String callId,
     bool audioOnly = false,
+    bool createIfMissing = false,
     String callType = 'default',
     VoidCallback? onCallEnded,
   }) {
@@ -59,6 +60,7 @@ class OitVideoCall {
       callId: callId,
       callType: callType,
       audioOnly: audioOnly,
+      createIfMissing: createIfMissing,
       onCallEnded: onCallEnded,
     );
   }
