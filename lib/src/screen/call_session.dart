@@ -25,6 +25,11 @@ abstract class CallSession {
 
   Future<Call> getCall({required String callType, required String callId});
 
+  /// Like [getCall] but creates the call if it does not exist on the
+  /// coordinator. Cannot 404 — first caller creates, subsequent callers
+  /// receive the existing call.
+  Future<Call> getOrCreateCall({required String callType, required String callId});
+
   Future<void> joinCall(Call call);
 
   Future<void> setCameraEnabled(Call call, bool enabled);
@@ -65,6 +70,20 @@ class StreamCallSession implements CallSession {
         throw const CallNotFoundError();
       }
       throw Exception('call.get() failed: ${failure.error}');
+    }
+    return call;
+  }
+
+  @override
+  Future<Call> getOrCreateCall({required String callType, required String callId}) async {
+    final call = StreamVideo.instance.makeCall(
+      callType: StreamCallType.fromString(callType),
+      id: callId,
+    );
+    final result = await call.getOrCreate();
+    if (result.isFailure) {
+      final failure = result as Failure;
+      throw Exception('call.getOrCreate() failed: ${failure.error}');
     }
     return call;
   }
