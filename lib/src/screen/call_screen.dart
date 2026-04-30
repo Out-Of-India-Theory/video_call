@@ -160,7 +160,9 @@ class _CallScreenState extends State<CallScreen> {
       setState(
         () => _phase = _Errored(
           OitVideoCallErrorCode.joinFailed,
-          'Could not load call.',
+          widget.createIfMissing
+              ? 'Could not start call.'
+              : 'Could not load call.',
         ),
       );
       return;

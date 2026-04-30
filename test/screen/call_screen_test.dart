@@ -312,7 +312,7 @@ void main() {
 
     expect(session.getOrCreateCount, 1);
     expect(session.getCallCount, 0);
-    expect(find.textContaining('load call'), findsOneWidget);
+    expect(find.textContaining('start call'), findsOneWidget);
     expect(find.text('Retry'), findsOneWidget);
   });
 
