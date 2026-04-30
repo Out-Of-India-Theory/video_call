@@ -293,6 +293,7 @@ void main() {
     }
 
     expect(session.getOrCreateCount, 1);
+    expect(session.getCallCount, 0);
     // The screen reaches _Ready (would-be StreamCallContainer rendering); no error UI.
     expect(find.text('Retry'), findsNothing);
   });
@@ -309,6 +310,8 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
+    expect(session.getOrCreateCount, 1);
+    expect(session.getCallCount, 0);
     expect(find.textContaining('load call'), findsOneWidget);
     expect(find.text('Retry'), findsOneWidget);
   });

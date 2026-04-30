@@ -19,12 +19,13 @@ class FakeCallSession implements CallSession {
   bool getCallNotFound = false;
 
   Object? getOrCreateError;
-  int getOrCreateCount = 0;
 
   Object? joinError;
 
   // Observable state.
   int connectCount = 0;
+  int getCallCount = 0;
+  int getOrCreateCount = 0;
   int joinCount = 0;
   int leaveCount = 0;
   int disposeCount = 0;
@@ -47,6 +48,7 @@ class FakeCallSession implements CallSession {
     required String callType,
     required String callId,
   }) async {
+    getCallCount++;
     if (getCallNotFound) {
       throw const CallNotFoundError();
     }
