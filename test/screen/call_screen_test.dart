@@ -20,6 +20,7 @@ Widget _host({
   required FakeCallSession session,
   required FakePermissionGate gate,
   bool audioOnly = false,
+  bool createIfMissing = false,
   Future<bool> Function()? openSettings,
 }) {
   return MaterialApp(
@@ -28,6 +29,7 @@ Widget _host({
       callId: 'c1',
       callType: 'default',
       audioOnly: audioOnly,
+      createIfMissing: createIfMissing,
       deps: CallScreenDeps(
         session: session,
         permissionGate: gate,
@@ -262,5 +264,65 @@ void main() {
 
     expect(session.connectCount, 2);
     expect(session.joinCount, 1);
+  });
+
+  testWidgets('createIfMissing: true uses getOrCreateCall, never getCall', (tester) async {
+    final session = FakeCallSession();
+    // Set getCallNotFound = true to prove getCall is NOT called (otherwise this would fail).
+    session.getCallNotFound = true;
+    final gate = FakePermissionGate();
+
+    final priorOnError = FlutterError.onError;
+    FlutterError.onError = (details) {
+      if (details.exceptionAsString().contains('Call') ||
+          details.toString().contains('Mock')) {
+        return; // swallow render-phase mock errors
+      }
+      priorOnError?.call(details);
+    };
+    addTearDown(() => FlutterError.onError = priorOnError);
+
+    await tester.pumpWidget(_host(
+      config: _config(),
+      session: session,
+      gate: gate,
+      createIfMissing: true,
+    ));
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    expect(session.getOrCreateCount, 1);
+    // The screen reaches _Ready (would-be StreamCallContainer rendering); no error UI.
+    expect(find.text('Retry'), findsNothing);
+  });
+
+  testWidgets('createIfMissing: true + getOrCreate failure → joinFailed', (tester) async {
+    final session = FakeCallSession()..getOrCreateError = Exception('boom');
+    final gate = FakePermissionGate();
+
+    await tester.pumpWidget(_host(
+      config: _config(),
+      session: session,
+      gate: gate,
+      createIfMissing: true,
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('load call'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+  });
+
+  testWidgets('createIfMissing: false (default) preserves existing getCall path', (tester) async {
+    // Same as the existing 'phase 4: getCall not found → callNotFound' test —
+    // this is a regression check that the default path is unchanged.
+    final session = FakeCallSession()..getCallNotFound = true;
+    final gate = FakePermissionGate();
+
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('not available'), findsOneWidget);
+    expect(session.getOrCreateCount, 0);
   });
 }
