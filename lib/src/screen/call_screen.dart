@@ -87,14 +87,17 @@ class _CallScreenState extends State<CallScreen> {
     final perm = await _gate.request(includeCamera: !widget.audioOnly);
     if (!mounted) return;
     if (!perm.granted) {
+      // Always offer "Open Settings" rather than Retry. Retry is unreliable:
+      // on iOS the OS returns "denied" immediately on subsequent request()
+      // calls without re-prompting; on Android once the user hits "Don't ask
+      // again" Retry stops working. Settings always works.
+      final scope = widget.audioOnly ? 'Microphone' : 'Camera and microphone';
       setState(
         () => _phase = _Errored(
           OitVideoCallErrorCode.permissionDenied,
-          perm.permanentlyDenied
-              ? 'Permission permanently denied. Open settings to grant.'
-              : 'Camera and microphone are required.',
-          canRetry: !perm.permanentlyDenied,
-          canOpenSettings: perm.permanentlyDenied,
+          '$scope access is required. Tap "Open Settings" to enable.',
+          canRetry: false,
+          canOpenSettings: true,
         ),
       );
       return;

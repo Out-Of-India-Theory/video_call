@@ -40,7 +40,7 @@ Widget _host({
 }
 
 void main() {
-  testWidgets('phase 1: permissions temporarily denied → Retry shown', (tester) async {
+  testWidgets('phase 1: temporarily denied → Open Settings (no Retry)', (tester) async {
     final session = FakeCallSession();
     final gate = FakePermissionGate()
       ..result = const PermissionResult(granted: false, permanentlyDenied: false);
@@ -49,11 +49,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('required'), findsOneWidget);
-    expect(find.text('Retry'), findsOneWidget);
-    expect(find.text('Open Settings'), findsNothing);
+    expect(find.text('Open Settings'), findsOneWidget);
+    expect(find.text('Retry'), findsNothing);
   });
 
-  testWidgets('phase 1: permanently denied → Open Settings shown', (tester) async {
+  testWidgets('phase 1: permanently denied → Open Settings (no Retry)', (tester) async {
     final session = FakeCallSession();
     final gate = FakePermissionGate()
       ..result = const PermissionResult(granted: false, permanentlyDenied: true);
@@ -61,9 +61,26 @@ void main() {
     await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('permanently'), findsOneWidget);
+    expect(find.textContaining('required'), findsOneWidget);
     expect(find.text('Open Settings'), findsOneWidget);
     expect(find.text('Retry'), findsNothing);
+  });
+
+  testWidgets('phase 1: audioOnly denial message says "Microphone" not "Camera"', (tester) async {
+    final session = FakeCallSession();
+    final gate = FakePermissionGate()
+      ..result = const PermissionResult(granted: false, permanentlyDenied: false);
+
+    await tester.pumpWidget(_host(
+      config: _config(),
+      session: session,
+      gate: gate,
+      audioOnly: true,
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Microphone'), findsOneWidget);
+    expect(find.textContaining('Camera'), findsNothing);
   });
 
   testWidgets('audioOnly skips camera permission', (tester) async {

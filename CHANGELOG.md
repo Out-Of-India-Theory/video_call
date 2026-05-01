@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Phase 1 permission denial now always shows "Open Settings" (Retry is gone).
+  Retry was unreliable cross-platform: iOS returns "denied" immediately on
+  subsequent `request()` calls without re-prompting, and on Android once the
+  user hits "Don't ask again" Retry stops working. Settings always works.
+  The denial message also now says "Microphone" vs "Camera and microphone"
+  based on the `audioOnly` flag.
 - Add `createIfMissing` flag to `OitVideoCall.callScreen`. When `true`, the
   call screen calls `Stream`'s `call.getOrCreate()` instead of `call.get()`,
   enabling first-joiner-creates semantics. Default `false` preserves existing
