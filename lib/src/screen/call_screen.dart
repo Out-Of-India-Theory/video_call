@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import '../config.dart';
 import '../errors.dart';
 import 'call_session.dart';
@@ -79,6 +80,10 @@ class _CallScreenState extends State<CallScreen> {
     _session = widget.deps?.session ?? StreamCallSession();
     _gate = widget.deps?.permissionGate ?? RealPermissionGate();
     _openSettings = widget.deps?.openSettings ?? openAppSettings;
+    // Keep the screen on for the duration of the call screen's lifetime.
+    // Disabled in dispose. Fire-and-forget — wakelock_plus catches platform
+    // exceptions internally and we don't want to gate _start() on it.
+    WakelockPlus.enable();
     _start();
   }
 
@@ -199,6 +204,7 @@ class _CallScreenState extends State<CallScreen> {
       _session.leaveCall(_call!);
     }
     _session.dispose();
+    WakelockPlus.disable();
     super.dispose();
   }
 
