@@ -234,7 +234,12 @@ class _CallScreenState extends State<CallScreen> {
             onRetry: r ? _retry : null,
             onOpenSettings: s ? () => _openSettings() : null,
           ),
-        _Ready(call: final call) => StreamCallContainer(call: call),
+        _Ready(call: final call) => StreamCallContainer(
+          call: call,
+          pictureInPictureConfiguration: const PictureInPictureConfiguration(
+            enablePictureInPicture: true,
+          ),
+        ),
       },
     );
   }
