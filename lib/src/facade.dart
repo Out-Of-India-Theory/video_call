@@ -45,6 +45,7 @@ class OitVideoCall {
     bool createIfMissing = false,
     String callType = 'default',
     VoidCallback? onCallEnded,
+    Future<bool> Function(BuildContext context)? confirmLeave,
   }) {
     if (_config == null) {
       return const Scaffold(
@@ -62,6 +63,7 @@ class OitVideoCall {
       audioOnly: audioOnly,
       createIfMissing: createIfMissing,
       onCallEnded: onCallEnded,
+      confirmLeave: confirmLeave,
     );
   }
 }

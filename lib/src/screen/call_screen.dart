@@ -26,6 +26,7 @@ class CallScreen extends StatefulWidget {
     required this.audioOnly,
     this.createIfMissing = false,
     this.onCallEnded,
+    this.confirmLeave,
     @visibleForTesting this.deps,
   });
 
@@ -35,6 +36,12 @@ class CallScreen extends StatefulWidget {
   final bool audioOnly;
   final bool createIfMissing;
   final VoidCallback? onCallEnded;
+
+  /// Optional gate for the back press. When non-null, the OS back button
+  /// won't pop the call screen until this future resolves to `true`. Host
+  /// apps wire this to whatever confirmation UI matches their design system
+  /// (bottom sheet, dialog, etc.).
+  final Future<bool> Function(BuildContext context)? confirmLeave;
 
   @visibleForTesting
   final CallScreenDeps? deps;
@@ -210,6 +217,23 @@ class _CallScreenState extends State<CallScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scaffold = _buildScaffold();
+    final confirmLeave = widget.confirmLeave;
+    if (confirmLeave == null) return scaffold;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final shouldLeave = await confirmLeave(context);
+        if (shouldLeave && mounted && context.mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: scaffold,
+    );
+  }
+
+  Widget _buildScaffold() {
     return Scaffold(
       body: switch (_phase) {
         _Loading() => const Center(
