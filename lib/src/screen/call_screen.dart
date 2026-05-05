@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
@@ -80,6 +82,12 @@ class _CallScreenState extends State<CallScreen> {
   late final Future<bool> Function() _openSettings;
   Call? _call;
   _Phase _phase = _Loading();
+
+  /// When `true`, the screen has decided to leave (user confirmed,
+  /// disconnect button tapped + confirmed, or the call ended on the
+  /// server). PopScope's `canPop` mirrors this so the next pop attempt
+  /// goes through instead of being re-intercepted into confirmLeave.
+  bool _leaveInProgress = false;
 
   @override
   void initState() {
@@ -221,16 +229,58 @@ class _CallScreenState extends State<CallScreen> {
     final confirmLeave = widget.confirmLeave;
     if (confirmLeave == null) return scaffold;
     return PopScope(
-      canPop: false,
+      // Once a leave is in flight we flip canPop so the next pop attempt
+      // (scheduled in [_triggerPop]) actually pops instead of bouncing
+      // back into confirmLeave and showing the dialog twice.
+      canPop: _leaveInProgress,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
         final shouldLeave = await confirmLeave(context);
         if (shouldLeave && mounted && context.mounted) {
-          Navigator.of(context).pop();
+          _triggerPop();
         }
       },
       child: scaffold,
     );
+  }
+
+  /// Single funnel for actually popping the call screen. Sets the
+  /// `_leaveInProgress` flag so PopScope's `canPop` flips on the next
+  /// build, then schedules `Navigator.pop` for the post-frame callback —
+  /// by which point the rebuild has happened and the pop sails through.
+  void _triggerPop() {
+    if (_leaveInProgress || !mounted) return;
+    setState(() => _leaveInProgress = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && context.mounted) {
+        Navigator.of(context).pop();
+      }
+    });
+  }
+
+  /// Handler for the in-call leave button (the red disconnect icon in the
+  /// app bar). Without this override, [StreamCallContainer] would call
+  /// `call.leave()` *before* [confirmLeave] is shown — the call ends
+  /// immediately and Cancel can't undo it, leaving the screen stuck on
+  /// "Connecting". Routing through here ensures we ask the user first and
+  /// only leave (via [_triggerPop] → `dispose` → `leaveCall`) on confirm.
+  Future<void> _onLeaveCallTap() async {
+    final confirmLeave = widget.confirmLeave;
+    if (confirmLeave != null) {
+      final shouldLeave = await confirmLeave(context);
+      if (!shouldLeave || !mounted) return;
+    }
+    _triggerPop();
+  }
+
+  /// Handler for non-user-initiated disconnects (call duration timeout,
+  /// network drop, host ended). These don't go through [confirmLeave] —
+  /// we just pop the screen so the host app's caller can react. Without
+  /// this, the SDK's default would be `Navigator.maybePop` which
+  /// re-enters our PopScope and shows confirmLeave for an already-ended
+  /// call, leaving the screen stuck on "Connecting" if the user cancels.
+  void _onCallDisconnected(CallDisconnectedProperties _) {
+    _triggerPop();
   }
 
   Widget _buildScaffold() {
@@ -263,6 +313,8 @@ class _CallScreenState extends State<CallScreen> {
           pictureInPictureConfiguration: const PictureInPictureConfiguration(
             enablePictureInPicture: true,
           ),
+          onLeaveCallTap: () => unawaited(_onLeaveCallTap()),
+          onCallDisconnected: _onCallDisconnected,
         ),
       },
     );
