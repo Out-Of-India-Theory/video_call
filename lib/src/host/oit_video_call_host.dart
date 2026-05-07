@@ -16,6 +16,10 @@ import '../facade.dart';
 ///
 /// When [ActiveCallController.state.mode] is `minimized`, a draggable mini
 /// window floats above the navigator. Otherwise the host is a no-op pass-through.
+///
+/// **Important:** Call [OitVideoCall.init] *before* mounting this widget. The
+/// host attaches its controller listener once in `initState`; later calls to
+/// `init()` are not observed and the host will silently never show PiP.
 class OitVideoCallHost extends StatefulWidget {
   const OitVideoCallHost({
     super.key,
