@@ -322,6 +322,11 @@ class ActiveCallController extends ChangeNotifier {
 
   /// Permanent end. Tears down the SDK call, resets state, notifies.
   Future<void> endCall() async {
+    // Idempotent: a no-op when already idle. Prevents spurious
+    // `ending → idle` notification cycles on duplicate calls (e.g. host
+    // app's lifecycle observer + the SDK disconnect listener firing in
+    // close succession).
+    if (_state.mode == ActiveCallMode.idle) return;
     // Cancel any in-flight [connectAndJoin] so a late commit can't flip us
     // back to `connected` after we've already torn down.
     _connectEpoch++;

@@ -218,11 +218,15 @@ void main() {
       expect(session.disposeCount, 1);
     });
 
-    test('endCall before connect: tears down session, no leave', () async {
+    test('endCall before connect: idempotent no-op when already idle', () async {
+      // I-1 from final review: endCall short-circuits when state is already
+      // idle so duplicate calls (host lifecycle observer + SDK disconnect
+      // listener firing in close succession) don't emit spurious
+      // `ending → idle` notification cycles.
       await controller.endCall();
       expect(controller.state.mode, ActiveCallMode.idle);
       expect(session.leaveCount, 0);
-      expect(session.disposeCount, 1);
+      expect(session.disposeCount, 0);
     });
 
     test('endCall swallows leave errors (best-effort)', () async {

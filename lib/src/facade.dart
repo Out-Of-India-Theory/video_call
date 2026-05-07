@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'active_call/active_call_controller.dart';
 import 'config.dart';
 import 'errors.dart';
-import 'host/oit_video_call_host.dart';
 import 'models/video_user.dart';
 import 'screen/call_screen.dart';
 import 'screen/error_view.dart';
@@ -138,15 +137,4 @@ class OitVideoCall {
       confirmLeave: confirmLeave,
     );
   }
-
-  static Widget host({
-    required Widget child,
-    Widget Function(BuildContext, ActiveCallController)? minimizedBuilder,
-    VoidCallback? onExpandRequested,
-  }) =>
-      OitVideoCallHost(
-        minimizedBuilder: minimizedBuilder,
-        onExpandRequested: onExpandRequested,
-        child: child,
-      );
 }

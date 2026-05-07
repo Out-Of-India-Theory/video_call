@@ -66,12 +66,15 @@ Navigator.push(
 
 | Member | Description |
 |---|---|
-| `OitVideoCall.init(...)` | Stores config; does not connect. |
-| `OitVideoCall.callScreen({callId, audioOnly, callType, onCallEnded})` | Returns a widget; push with `MaterialPageRoute`. |
-| `OitVideoCall.reset()` | Tears down the singleton. |
+| `OitVideoCall.init(apiKey, user, tokenProvider)` | Stores config + builds the singleton controller. Does not connect. |
+| `OitVideoCall.callScreen({callId, audioOnly, callType, createIfMissing, onCallEnded, confirmLeave})` | Returns the call-screen widget; push with `MaterialPageRoute`. Caches its args so the PiP host can rebuild on tap-to-expand. |
+| `OitVideoCall.reset()` | Ends any active call, tears down the singleton, clears cached args. |
 | `OitVideoCall.isInitialized` | Whether `init()` was called. |
+| `OitVideoCallHost({child, minimizedBuilder?, onExpandRequested?})` | Wrap your `MaterialApp.builder` with this to enable in-app PiP. See "In-app Picture-in-Picture" below. |
+| `ActiveCallController` (read-only via `OitVideoCall.controllerOrThrow`) | Exposes `state` (mode, callId, live `Call`) for apps that want to react to call lifecycle. |
+| `ActiveCallMode`, `ActiveCallState` | State-machine types backing the controller. |
 | `VideoUser(id, name, image)` | The signed-in user. |
-| `OitVideoCallException`, `OitVideoCallErrorCode` | Error types — though no exceptions cross the public API in v1; all errors render inside the call screen. |
+| `OitVideoCallException`, `OitVideoCallErrorCode` | Error types — no exceptions cross the public API; all errors render inside the call screen. |
 
 ## Behavior
 
