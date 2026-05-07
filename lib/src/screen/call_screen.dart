@@ -111,8 +111,14 @@ class _CallScreenState extends State<CallScreen> {
     // `connected` here (rather than from the host) so the mini overlay
     // doesn't disappear for a frame before this screen has rendered. The
     // call already has a live `Call`, so `_start()` below short-circuits
-    // through `connectAndJoin`'s "already connected" branch.
-    if (_controller.state.mode == ActiveCallMode.minimized) {
+    // through `connectAndJoin`'s "already connected" branch. We only flip
+    // when the callId matches — otherwise the host has pushed us for a
+    // different call while the controller is still minimized for an old
+    // one, and unconditionally flipping would corrupt the controller's
+    // state (mode=connected but callId pointing at the wrong call).
+    // `_start()` will then throw via `connectAndJoin`'s state check.
+    if (_controller.state.mode == ActiveCallMode.minimized &&
+        _controller.state.callId == widget.callId) {
       _controller.expand();
     }
     _start();

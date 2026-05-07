@@ -3,7 +3,7 @@ library oit_video_call;
 
 export 'src/active_call/active_call_controller.dart' show ActiveCallController;
 export 'src/active_call/active_call_state.dart' show ActiveCallMode, ActiveCallState;
-export 'src/facade.dart' show CallScreenArgs, OitVideoCall;
+export 'src/facade.dart' show OitVideoCall;
 export 'src/host/minimized_call_view.dart' show MinimizedCallView;
 export 'src/host/oit_video_call_host.dart' show OitVideoCallHost;
 export 'src/models/video_user.dart' show VideoUser;
