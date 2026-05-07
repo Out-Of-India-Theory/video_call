@@ -16,6 +16,22 @@ OitVideoCallConfig _config({Future<String> Function()? tokenProvider}) =>
       tokenProvider: tokenProvider ?? (() async => 'jwt'),
     );
 
+/// Swallow render-phase Flutter errors that fire when [CallScreen] reaches
+/// its `_Ready` branch under test: that branch builds [StreamCallContainer],
+/// which calls into a mocked [Call] and throws "Call ..." / "Mock ..."
+/// errors during paint. Restored at teardown.
+void _swallowRenderPhaseMockErrors() {
+  final priorOnError = FlutterError.onError;
+  FlutterError.onError = (details) {
+    if (details.exceptionAsString().contains('Call') ||
+        details.toString().contains('Mock')) {
+      return; // swallow render-phase mock errors
+    }
+    priorOnError?.call(details);
+  };
+  addTearDown(() => FlutterError.onError = priorOnError);
+}
+
 ({Widget widget, ActiveCallController controller}) _host({
   required OitVideoCallConfig config,
   required FakeCallSession session,
@@ -92,15 +108,7 @@ void main() {
     final session = FakeCallSession();
     final gate = FakePermissionGate();
 
-    final priorOnError = FlutterError.onError;
-    FlutterError.onError = (details) {
-      if (details.exceptionAsString().contains('Call') ||
-          details.toString().contains('Mock')) {
-        return; // swallow render-phase mock errors
-      }
-      priorOnError?.call(details);
-    };
-    addTearDown(() => FlutterError.onError = priorOnError);
+    _swallowRenderPhaseMockErrors();
 
     await tester.pumpWidget(_host(
       config: _config(),
@@ -124,15 +132,7 @@ void main() {
     final session = FakeCallSession();
     final gate = FakePermissionGate();
 
-    final priorOnError = FlutterError.onError;
-    FlutterError.onError = (details) {
-      if (details.exceptionAsString().contains('Call') ||
-          details.toString().contains('Mock')) {
-        return; // swallow render-phase mock errors
-      }
-      priorOnError?.call(details);
-    };
-    addTearDown(() => FlutterError.onError = priorOnError);
+    _swallowRenderPhaseMockErrors();
 
     await tester.pumpWidget(_host(
       config: _config(),
@@ -208,15 +208,7 @@ void main() {
     final session = FakeCallSession();
     final gate = FakePermissionGate();
 
-    final priorOnError = FlutterError.onError;
-    FlutterError.onError = (details) {
-      if (details.exceptionAsString().contains('Call') ||
-          details.toString().contains('Mock')) {
-        return; // swallow render-phase mock errors
-      }
-      priorOnError?.call(details);
-    };
-    addTearDown(() => FlutterError.onError = priorOnError);
+    _swallowRenderPhaseMockErrors();
 
     await tester.pumpWidget(_host(config: _config(), session: session, gate: gate).widget);
     // Don't pumpAndSettle — _Ready triggers StreamCallContainer with a Mock Call.
@@ -237,15 +229,7 @@ void main() {
     final session = FakeCallSession();
     final gate = FakePermissionGate();
 
-    final priorOnError = FlutterError.onError;
-    FlutterError.onError = (details) {
-      if (details.exceptionAsString().contains('Call') ||
-          details.toString().contains('Mock')) {
-        return; // swallow render-phase mock errors
-      }
-      priorOnError?.call(details);
-    };
-    addTearDown(() => FlutterError.onError = priorOnError);
+    _swallowRenderPhaseMockErrors();
 
     final hosted = _host(config: _config(), session: session, gate: gate);
     await tester.pumpWidget(hosted.widget);
@@ -271,15 +255,7 @@ void main() {
     final session = FakeCallSession()..connectError = Exception('boom');
     final gate = FakePermissionGate();
 
-    final priorOnError = FlutterError.onError;
-    FlutterError.onError = (details) {
-      if (details.exceptionAsString().contains('Call') ||
-          details.toString().contains('Mock')) {
-        return; // swallow render-phase mock errors
-      }
-      priorOnError?.call(details);
-    };
-    addTearDown(() => FlutterError.onError = priorOnError);
+    _swallowRenderPhaseMockErrors();
 
     await tester.pumpWidget(_host(config: _config(), session: session, gate: gate).widget);
     await tester.pumpAndSettle();
@@ -306,15 +282,7 @@ void main() {
     session.getCallNotFound = true;
     final gate = FakePermissionGate();
 
-    final priorOnError = FlutterError.onError;
-    FlutterError.onError = (details) {
-      if (details.exceptionAsString().contains('Call') ||
-          details.toString().contains('Mock')) {
-        return; // swallow render-phase mock errors
-      }
-      priorOnError?.call(details);
-    };
-    addTearDown(() => FlutterError.onError = priorOnError);
+    _swallowRenderPhaseMockErrors();
 
     await tester.pumpWidget(_host(
       config: _config(),

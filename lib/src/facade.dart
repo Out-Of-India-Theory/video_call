@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:stream_video_flutter/stream_video_flutter.dart' show StreamVideo;
 import 'active_call/active_call_controller.dart';
 import 'config.dart';
 import 'errors.dart';
@@ -48,7 +47,6 @@ class OitVideoCall {
     await _controller?.endCall();
     _controller = null;
     _config = null;
-    await StreamVideo.reset();
   }
 
   static Widget callScreen({

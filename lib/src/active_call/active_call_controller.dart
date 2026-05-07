@@ -144,6 +144,7 @@ class ActiveCallController extends ChangeNotifier {
   /// Kept for callers that want to flip into `connecting` without performing
   /// I/O (e.g. unit tests, future-task host-app code). [connectAndJoin] does
   /// this transition internally for you.
+  @visibleForTesting
   void beginConnecting({
     required String callId,
     required String callType,
