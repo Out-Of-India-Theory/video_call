@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:mocktail/mocktail.dart';
 import 'package:oit_video_call/src/screen/call_session.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
@@ -11,6 +13,10 @@ class FakeCallSession implements CallSession {
   // Configurable failure modes. Set before mounting the screen.
   Object? connectError;
   Object? getCallError;
+
+  /// When non-null, [connect] awaits this completer before returning. Lets a
+  /// test pin the controller in `connecting` mode while it pumps a back-press.
+  Completer<void>? connectGate;
 
   /// Simulates a 404 from `call.get()` (call does not exist on the
   /// coordinator). Throws the same [CallNotFoundError] the real session
@@ -41,6 +47,7 @@ class FakeCallSession implements CallSession {
     required String token,
   }) async {
     connectCount++;
+    if (connectGate != null) await connectGate!.future;
     if (connectError != null) throw connectError!;
   }
 

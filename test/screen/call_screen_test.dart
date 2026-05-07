@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:oit_video_call/src/active_call/active_call_controller.dart';
+import 'package:oit_video_call/src/active_call/active_call_state.dart';
 import 'package:oit_video_call/src/config.dart';
 import 'package:oit_video_call/src/models/video_user.dart';
 import 'package:oit_video_call/src/screen/call_screen.dart';
@@ -39,6 +42,7 @@ void _swallowRenderPhaseMockErrors() {
   bool audioOnly = false,
   bool createIfMissing = false,
   Future<bool> Function()? openSettings,
+  Future<bool> Function(BuildContext context)? confirmLeave,
 }) {
   final controller = ActiveCallController(session: session);
   return (
@@ -50,6 +54,7 @@ void _swallowRenderPhaseMockErrors() {
         callType: 'default',
         audioOnly: audioOnly,
         createIfMissing: createIfMissing,
+        confirmLeave: confirmLeave,
         deps: CallScreenDeps(
           permissionGate: gate,
           openSettings: openSettings,
@@ -329,5 +334,189 @@ void main() {
 
     expect(find.textContaining('not available'), findsOneWidget);
     expect(session.getOrCreateCount, 0);
+  });
+
+  // -----------------------------------------------------------------
+  // Task 5: back-press → minimize when connected.
+  // -----------------------------------------------------------------
+
+  testWidgets('back press while connected minimizes (no confirm)', (tester) async {
+    final session = FakeCallSession();
+    final gate = FakePermissionGate();
+    var confirmLeaveCalls = 0;
+
+    _swallowRenderPhaseMockErrors();
+
+    final hosted = _host(
+      config: _config(),
+      session: session,
+      gate: gate,
+      confirmLeave: (_) async {
+        confirmLeaveCalls++;
+        return true;
+      },
+    );
+    await tester.pumpWidget(hosted.widget);
+    // Drive the phase chain forward without `pumpAndSettle` (which would
+    // block on the StreamCallContainer's mocked Call methods).
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    // Sanity: controller is connected.
+    expect(hosted.controller.state.mode, ActiveCallMode.connected);
+
+    // Act: simulate a system back-press. PopScope intercepts and our
+    // handler should call `controller.minimize()` then `_triggerPop()`.
+    await tester.binding.handlePopRoute();
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    // The key assertions: minimize ran, confirmLeave did not.
+    expect(hosted.controller.state.mode, ActiveCallMode.minimized);
+    expect(confirmLeaveCalls, 0);
+  });
+
+  testWidgets('back press while connecting calls confirmLeave', (tester) async {
+    // Stall connect() so the controller stays in `connecting` mode while
+    // we issue the back-press.
+    final gate = FakePermissionGate();
+    final session = FakeCallSession()..connectGate = Completer<void>();
+    var confirmLeaveCalls = 0;
+
+    final hosted = _host(
+      config: _config(),
+      session: session,
+      gate: gate,
+      confirmLeave: (_) async {
+        confirmLeaveCalls++;
+        return false; // user cancels — controller stays connecting.
+      },
+    );
+    await tester.pumpWidget(hosted.widget);
+    // Pump enough to clear the permission gate and enter Phase 3 (connect).
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    expect(hosted.controller.state.mode, ActiveCallMode.connecting);
+
+    // Act: back-press while still connecting → confirmLeave should run.
+    await tester.binding.handlePopRoute();
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    expect(confirmLeaveCalls, 1);
+    // User cancelled → controller still connecting (not minimized, not idle).
+    expect(hosted.controller.state.mode, ActiveCallMode.connecting);
+
+    // Cleanup: release the stalled connect with an error so the connectAndJoin
+    // future resolves before the test ends.
+    session.connectError = Exception('stop');
+    session.connectGate!.complete();
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+  });
+
+  testWidgets('back press while connecting + confirmed → endCall + idle', (tester) async {
+    final gate = FakePermissionGate();
+    final session = FakeCallSession()..connectGate = Completer<void>();
+
+    final hosted = _host(
+      config: _config(),
+      session: session,
+      gate: gate,
+      confirmLeave: (_) async => true,
+    );
+    await tester.pumpWidget(hosted.widget);
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    expect(hosted.controller.state.mode, ActiveCallMode.connecting);
+
+    await tester.binding.handlePopRoute();
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    // Confirmed leave during connecting calls endCall() → controller idle.
+    expect(hosted.controller.state.mode, ActiveCallMode.idle);
+
+    // Cleanup: error the stalled connect so connectAndJoin resolves to
+    // ConnectErrored (not ConnectReady, which would re-render
+    // StreamCallContainer against a Mock Call and throw type errors).
+    session.connectError = Exception('cancelled');
+    session.connectGate!.complete();
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+  });
+
+  testWidgets('back press without confirmLeave during connecting does not minimize', (tester) async {
+    final gate = FakePermissionGate();
+    final session = FakeCallSession()..connectGate = Completer<void>();
+
+    // No confirmLeave wired — the new PopScope wraps regardless. The
+    // controller should NOT flip to minimized; it stays connecting (and
+    // the route attempts to pop, but the home route has no parent to pop
+    // to in the test harness, so we just check the controller state).
+    final hosted = _host(
+      config: _config(),
+      session: session,
+      gate: gate,
+    );
+    await tester.pumpWidget(hosted.widget);
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    expect(hosted.controller.state.mode, ActiveCallMode.connecting);
+
+    await tester.binding.handlePopRoute();
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    // Connecting + no confirmLeave: PopScope handler calls _triggerPop
+    // directly without minimizing. The controller is unchanged (still
+    // connecting from the stalled connect()).
+    expect(hosted.controller.state.mode, ActiveCallMode.connecting);
+
+    // Cleanup.
+    session.connectError = Exception('stop');
+    session.connectGate!.complete();
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+  });
+
+  testWidgets('back press in errored phase does not minimize', (tester) async {
+    // Force an error so the screen settles into `_Errored`. Whatever the
+    // controller's mode, it is NOT connected/fastReconnecting, so the
+    // PopScope handler must NOT call minimize().
+    final session = FakeCallSession()..connectError = Exception('boom');
+    final gate = FakePermissionGate();
+
+    final hosted = _host(config: _config(), session: session, gate: gate);
+    await tester.pumpWidget(hosted.widget);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Retry'), findsOneWidget);
+    final priorMode = hosted.controller.state.mode;
+    expect(priorMode, isNot(ActiveCallMode.connected));
+    expect(priorMode, isNot(ActiveCallMode.fastReconnecting));
+
+    await tester.binding.handlePopRoute();
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    // Mode unchanged — the connected/fastReconnecting branch was skipped.
+    expect(hosted.controller.state.mode, priorMode);
+    expect(hosted.controller.state.mode, isNot(ActiveCallMode.minimized));
   });
 }

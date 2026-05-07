@@ -174,8 +174,6 @@ class _CallScreenState extends State<CallScreen> {
   @override
   Widget build(BuildContext context) {
     final scaffold = _buildScaffold();
-    final confirmLeave = widget.confirmLeave;
-    if (confirmLeave == null) return scaffold;
     return PopScope(
       // Once a leave is in flight we flip canPop so the next pop attempt
       // (scheduled in [_triggerPop]) actually pops instead of bouncing
@@ -183,13 +181,47 @@ class _CallScreenState extends State<CallScreen> {
       canPop: _leaveInProgress,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
+        // Connected → minimize (no confirm). Connecting → preserve v1
+        // confirmLeave behavior (cancel join). fastReconnecting also
+        // minimizes — the call is real, just temporarily lost.
+        final mode = _controller.state.mode;
+        if (mode == ActiveCallMode.connected ||
+            mode == ActiveCallMode.fastReconnecting) {
+          if (_controller.minimize()) {
+            // Pop the route now that we're minimized; the host's overlay
+            // takes over.
+            _triggerPop();
+          }
+          return;
+        }
+        // Connecting / errored: fall back to confirmLeave (existing behavior).
+        final confirmLeave = widget.confirmLeave;
+        if (confirmLeave == null) {
+          _triggerPop();
+          return;
+        }
         final shouldLeave = await confirmLeave(context);
         if (shouldLeave && mounted && context.mounted) {
+          await _controller.endCall();
           _triggerPop();
         }
       },
       child: scaffold,
     );
+  }
+
+  /// Handler for the in-call AppBar back arrow. When connected (or
+  /// recovering), minimize and pop directly so the user sees the mini view
+  /// immediately. Otherwise fall through to [PopScope] via `maybePop`,
+  /// which runs the same matrix (confirmLeave for connecting/errored).
+  void _onBackPressed() {
+    final mode = _controller.state.mode;
+    if (mode == ActiveCallMode.connected ||
+        mode == ActiveCallMode.fastReconnecting) {
+      if (_controller.minimize()) _triggerPop();
+      return;
+    }
+    Navigator.of(context).maybePop();
   }
 
   /// Single funnel for actually popping the call screen. Sets the
@@ -261,6 +293,7 @@ class _CallScreenState extends State<CallScreen> {
           pictureInPictureConfiguration: const PictureInPictureConfiguration(
             enablePictureInPicture: true,
           ),
+          onBackPressed: _onBackPressed,
           onLeaveCallTap: () => unawaited(_onLeaveCallTap()),
           onCallDisconnected: _onCallDisconnected,
         ),
