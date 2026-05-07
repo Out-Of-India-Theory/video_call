@@ -51,25 +51,57 @@ class _MinimizedCallViewState extends State<MinimizedCallView> {
   static const double _height = 160;
   static const double _margin = 16;
 
-  Offset _offset = const Offset(_margin, 80);
+  /// Initialized lazily in [didChangeDependencies] once a [MediaQuery] is
+  /// available so we can place the mini at the top-right inset.
+  Offset? _offset;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_offset == null) {
+      final media = MediaQuery.of(context);
+      _offset = Offset(
+        media.size.width - _width - _margin,
+        media.padding.top + _margin,
+      );
+    }
+  }
+
+  /// Clamps [raw] inside the safe-area-adjusted viewport for the current
+  /// [MediaQueryData]. Used both when writing on drag (so the offset never
+  /// accumulates off-screen) and when reading on build (so orientation
+  /// changes can't leave a stale offset out of bounds).
+  Offset _clampToViewport(Offset raw, MediaQueryData media) {
+    const minX = _margin;
+    final minY = media.padding.top + 8;
+    final maxXraw = media.size.width - _width - _margin;
+    final maxYraw =
+        media.size.height - _height - _margin - media.padding.bottom;
+    // Defensive: on very small screens max could fall below min.
+    final maxX = maxXraw < minX ? minX : maxXraw;
+    final maxY = maxYraw < minY ? minY : maxYraw;
+    return Offset(
+      raw.dx.clamp(minX, maxX).toDouble(),
+      raw.dy.clamp(minY, maxY).toDouble(),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
-    final maxX = media.size.width - _width - _margin;
-    final maxY =
-        media.size.height - _height - _margin - media.padding.bottom;
-    final minY = media.padding.top + 8;
-
-    // Defensive clamp: on very small screens the max could fall below the min.
-    final clampedX = _offset.dx.clamp(_margin, maxX < _margin ? _margin : maxX);
-    final clampedY = _offset.dy.clamp(minY, maxY < minY ? minY : maxY);
+    // Re-clamp on read as a safety net for orientation changes; the
+    // write-time clamp in onPanUpdate already keeps drags in bounds.
+    final offset = _clampToViewport(_offset!, media);
+    final call = widget.controller?.state.call;
 
     return Positioned(
-      left: clampedX,
-      top: clampedY,
+      left: offset.dx,
+      top: offset.dy,
       child: GestureDetector(
-        onPanUpdate: (d) => setState(() => _offset += d.delta),
+        onPanUpdate: (d) => setState(() {
+          final media = MediaQuery.of(context);
+          _offset = _clampToViewport(_offset! + d.delta, media);
+        }),
         onTap: widget.onExpand,
         child: Material(
           elevation: 8,
@@ -82,7 +114,7 @@ class _MinimizedCallViewState extends State<MinimizedCallView> {
             child: Column(
               children: [
                 Expanded(child: _buildVideo()),
-                _buildControls(),
+                _buildControls(call),
               ],
             ),
           ),
@@ -106,6 +138,9 @@ class _MinimizedCallViewState extends State<MinimizedCallView> {
           s.callParticipants.where((p) => !p.isLocal).firstOrNull,
       builder: (_, remote) {
         if (remote == null) return const _Placeholder();
+        // Key by uniqueParticipantKey so renderer subscriptions are recreated
+        // cleanly when the remote participant changes (matches Stream's own
+        // widget conventions).
         return StreamCallParticipant(
           key: ValueKey(remote.uniqueParticipantKey),
           call: call,
@@ -117,19 +152,35 @@ class _MinimizedCallViewState extends State<MinimizedCallView> {
     );
   }
 
-  Widget _buildControls() {
+  Widget _buildControls(Call? call) {
+    final micButton = call != null
+        ? PartialCallStateBuilder<bool>(
+            call: call,
+            selector: (s) => s.localParticipant?.isAudioEnabled ?? false,
+            builder: (_, isOn) => IconButton(
+              iconSize: 18,
+              visualDensity: VisualDensity.compact,
+              onPressed: _toggleMic,
+              icon: Icon(
+                isOn ? Icons.mic : Icons.mic_off,
+                color: isOn ? Colors.white : Colors.redAccent,
+              ),
+            ),
+          )
+        : const IconButton(
+            iconSize: 18,
+            visualDensity: VisualDensity.compact,
+            onPressed: null,
+            icon: Icon(Icons.mic, color: Colors.white54),
+          );
+
     return Container(
       height: 40,
       color: Colors.black87,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          IconButton(
-            iconSize: 18,
-            visualDensity: VisualDensity.compact,
-            onPressed: _toggleMic,
-            icon: const Icon(Icons.mic, color: Colors.white),
-          ),
+          micButton,
           IconButton(
             iconSize: 18,
             visualDensity: VisualDensity.compact,
@@ -150,9 +201,9 @@ class _MinimizedCallViewState extends State<MinimizedCallView> {
   Future<void> _toggleMic() async {
     final call = widget.controller?.state.call;
     if (call == null) return;
-    final enabled =
+    final isOn =
         call.state.value.localParticipant?.isAudioEnabled ?? false;
-    await call.setMicrophoneEnabled(enabled: !enabled);
+    await call.setMicrophoneEnabled(enabled: !isOn);
   }
 }
 
