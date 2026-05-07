@@ -242,14 +242,17 @@ class _CallScreenState extends State<CallScreen> {
   /// app bar). Without this override, [StreamCallContainer] would call
   /// `call.leave()` *before* [confirmLeave] is shown — the call ends
   /// immediately and Cancel can't undo it, leaving the screen stuck on
-  /// "Connecting". Routing through here ensures we ask the user first and
-  /// only leave (via [_triggerPop]) on confirm.
+  /// "Connecting". Routing through here ensures we ask the user first and,
+  /// on confirm, end the call via the controller (mirroring the PopScope
+  /// no-minimize branch) before popping.
   Future<void> _onLeaveCallTap() async {
     final confirmLeave = widget.confirmLeave;
     if (confirmLeave != null) {
       final shouldLeave = await confirmLeave(context);
       if (!shouldLeave || !mounted) return;
     }
+    await _controller.endCall();
+    if (!mounted) return;
     _triggerPop();
   }
 

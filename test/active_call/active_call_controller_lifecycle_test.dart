@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:oit_video_call/src/active_call/active_call_controller.dart';
 import 'package:oit_video_call/src/active_call/active_call_state.dart';
@@ -235,6 +237,46 @@ void main() {
       await controller.endCall();
       expect(controller.state.mode, ActiveCallMode.idle);
     });
+
+    test(
+      'endCall while connectAndJoin is mid-flight: late completion does not flip back to connected',
+      () async {
+        // Pin connect() so the controller stays in `connecting` until we
+        // explicitly release the gate after endCall.
+        session.connectGate = Completer<void>();
+
+        final connectFuture = controller.connectAndJoin(
+          config: config,
+          callId: 'c1',
+          callType: 'default',
+          audioOnly: false,
+          createIfMissing: false,
+        );
+
+        // Yield once so connectAndJoin reaches the `await _session.connect`.
+        await Future<void>.delayed(Duration.zero);
+        expect(controller.state.mode, ActiveCallMode.connecting);
+
+        // Cancel mid-flight.
+        await controller.endCall();
+        expect(controller.state.mode, ActiveCallMode.idle);
+
+        // Now release the stalled connect. The cancellation check after
+        // `connect` should fire, the controller must NOT be flipped back
+        // to `connected`, and the future must resolve to ConnectErrored.
+        session.connectGate!.complete();
+        final result = await connectFuture;
+
+        expect(result, isA<ConnectErrored>());
+        expect(controller.state.mode, ActiveCallMode.idle);
+        expect(controller.state.call, isNull);
+
+        // The cleanup branch in connectAndJoin disposes the SDK once more
+        // on top of endCall's dispose — best-effort double-dispose is
+        // documented as safe.
+        expect(session.disposeCount, greaterThanOrEqualTo(1));
+      },
+    );
   });
 
   group('ActiveCallState equality', () {

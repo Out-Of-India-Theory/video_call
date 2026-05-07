@@ -446,14 +446,18 @@ void main() {
     // Confirmed leave during connecting calls endCall() → controller idle.
     expect(hosted.controller.state.mode, ActiveCallMode.idle);
 
-    // Cleanup: error the stalled connect so connectAndJoin resolves to
-    // ConnectErrored (not ConnectReady, which would re-render
-    // StreamCallContainer against a Mock Call and throw type errors).
-    session.connectError = Exception('cancelled');
+    // Cleanup: release the stalled connect so the in-flight connectAndJoin
+    // resolves. The controller's epoch was bumped by endCall() → the
+    // attempt detects cancellation after `connect()` returns and unwinds
+    // cleanly without ever flipping to `connected`.
     session.connectGate!.complete();
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 10));
     }
+
+    // Sanity: the late completion did not silently flip us back.
+    expect(hosted.controller.state.mode, ActiveCallMode.idle);
+    expect(hosted.controller.state.call, isNull);
   });
 
   testWidgets('back press without confirmLeave during connecting does not minimize', (tester) async {

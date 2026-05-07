@@ -41,6 +41,13 @@ class ActiveCallController extends ChangeNotifier {
   ActiveCallState _state = ActiveCallState.idle;
   ActiveCallState get state => _state;
 
+  /// Monotonically increasing token used by [connectAndJoin] to detect
+  /// cancellation. [endCall] / [reset] bump it; the running attempt sees the
+  /// mismatch after its next `await`, cleans up any partially-constructed
+  /// call, and returns [ConnectErrored] instead of silently committing a
+  /// connected state to a controller the caller has already torn down.
+  int _connectEpoch = 0;
+
   /// Phases 2–5 of the v1 `_start()`: token → connect → getCall → join.
   /// On success, mode flips to `connected` and `state.call` is non-null.
   ///
@@ -79,6 +86,10 @@ class ActiveCallController extends ChangeNotifier {
       return ConnectReady(_state.call!);
     }
 
+    // Stamp this attempt with an epoch so [endCall]/[reset] can cancel it.
+    final epoch = ++_connectEpoch;
+    bool isCancelled() => _connectEpoch != epoch;
+
     // Phase 2: token
     final String token;
     try {
@@ -88,6 +99,10 @@ class ActiveCallController extends ChangeNotifier {
         OitVideoCallErrorCode.tokenFetchFailed,
         'Could not fetch call token.',
       );
+    }
+    if (isCancelled()) {
+      // No SDK state to clean up yet — token fetch is pure host-side.
+      return ConnectErrored(OitVideoCallErrorCode.unknown, 'Cancelled');
     }
 
     // Phase 3: connect
@@ -103,6 +118,17 @@ class ActiveCallController extends ChangeNotifier {
         OitVideoCallErrorCode.joinFailed,
         'Could not connect to call service.',
       );
+    }
+    if (isCancelled()) {
+      // Best-effort: dispose the SDK singleton we just constructed.
+      // [endCall] already disposes, so this is a double-dispose — safe
+      // per Stream docs.
+      try {
+        await _session.dispose();
+      } catch (_) {
+        // best-effort
+      }
+      return ConnectErrored(OitVideoCallErrorCode.unknown, 'Cancelled');
     }
 
     // Phase 4: get / get-or-create
@@ -122,6 +148,20 @@ class ActiveCallController extends ChangeNotifier {
         createIfMissing ? 'Could not start call.' : 'Could not load call.',
       );
     }
+    if (isCancelled()) {
+      // Tear down the partially-set-up call before returning.
+      try {
+        await _session.leaveCall(call);
+      } catch (_) {
+        // best-effort
+      }
+      try {
+        await _session.dispose();
+      } catch (_) {
+        // best-effort
+      }
+      return ConnectErrored(OitVideoCallErrorCode.unknown, 'Cancelled');
+    }
 
     // Phase 5: join
     try {
@@ -134,6 +174,20 @@ class ActiveCallController extends ChangeNotifier {
         OitVideoCallErrorCode.joinFailed,
         'Could not join call.',
       );
+    }
+    if (isCancelled()) {
+      // We joined, but caller cancelled — clean up the live call.
+      try {
+        await _session.leaveCall(call);
+      } catch (_) {
+        // best-effort
+      }
+      try {
+        await _session.dispose();
+      } catch (_) {
+        // best-effort
+      }
+      return ConnectErrored(OitVideoCallErrorCode.unknown, 'Cancelled');
     }
 
     _state = _state.copyWith(mode: ActiveCallMode.connected, call: call);
@@ -187,6 +241,9 @@ class ActiveCallController extends ChangeNotifier {
 
   /// Permanent end. Tears down the SDK call, resets state, notifies.
   Future<void> endCall() async {
+    // Cancel any in-flight [connectAndJoin] so a late commit can't flip us
+    // back to `connected` after we've already torn down.
+    _connectEpoch++;
     final call = _state.call;
     _state = _state.copyWith(mode: ActiveCallMode.ending);
     notifyListeners();
@@ -207,6 +264,8 @@ class ActiveCallController extends ChangeNotifier {
   /// after a [ConnectErrored] result. Production code that has a live call
   /// should prefer [endCall].
   void reset() {
+    // Same cancellation semantics as [endCall] for any in-flight attempt.
+    _connectEpoch++;
     _state = ActiveCallState.idle;
     notifyListeners();
   }
