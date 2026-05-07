@@ -219,6 +219,27 @@ class ActiveCallController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Test-only: forces the controller into `minimized` with a null `call`.
+  /// Lets host-widget tests pump the [MinimizedCallView] without standing up a
+  /// fully-mocked Stream [Call] (whose state/partialState getters would
+  /// otherwise need stubbing). The resulting mini view falls into the
+  /// "no call yet" branch and renders its placeholders for video and mic,
+  /// while leaving the End button and host wiring fully intact.
+  @visibleForTesting
+  void debugForceMinimizedForTest({
+    required String callId,
+    required String callType,
+    bool audioOnly = false,
+  }) {
+    _state = ActiveCallState(
+      mode: ActiveCallMode.minimized,
+      callId: callId,
+      callType: callType,
+      audioOnly: audioOnly,
+    );
+    notifyListeners();
+  }
+
   /// Returns true when the transition was applied; false when ignored
   /// because the call isn't in a minimizable mode.
   bool minimize() {

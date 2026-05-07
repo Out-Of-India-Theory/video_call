@@ -78,6 +78,20 @@ class OitVideoCall {
     _controller = ActiveCallController();
   }
 
+  /// Test-only setup that lets host-widget tests bring their own
+  /// [ActiveCallController] (typically constructed with a `FakeCallSession`)
+  /// so they can drive it into `connected` / `minimized` modes deterministically
+  /// before pumping [OitVideoCallHost]. Production code paths through [init]
+  /// are unaffected.
+  @visibleForTesting
+  static void debugInitForTest({
+    required OitVideoCallConfig config,
+    required ActiveCallController controller,
+  }) {
+    _config = config;
+    _controller = controller;
+  }
+
   static Future<void> reset() async {
     await _controller?.endCall();
     _controller = null;

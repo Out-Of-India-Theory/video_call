@@ -95,9 +95,7 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
               MinimizedCallView(
                 controller: c,
                 onExpand: () => _onExpandRequested(context, c),
-                // Refined in Task 7 — for now this just ends the call without
-                // a confirm prompt.
-                onEnd: () async => c.endCall(),
+                onEnd: () => _onEndRequested(context, c),
               ),
       ],
     );
@@ -147,5 +145,26 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
         ),
       ),
     );
+  }
+
+  /// End-call handler for the minimized view's red phone icon.
+  ///
+  /// Mirrors the back-press flow in `CallScreen` — if the host app passed a
+  /// `confirmLeave` to [OitVideoCall.callScreen], we await that prompt and
+  /// only end the call when the user confirms. Without `confirmLeave` (or
+  /// with the cached args missing for any reason — e.g. the facade was reset
+  /// while a mini was still on screen) we fall through to [endCall] directly,
+  /// which keeps the historical "tap End → call ends" behavior for hosts that
+  /// haven't opted into a confirmation dialog.
+  Future<void> _onEndRequested(
+    BuildContext context,
+    ActiveCallController c,
+  ) async {
+    final confirm = OitVideoCall.lastArgsOrNull?.confirmLeave;
+    if (confirm != null) {
+      final ok = await confirm(context);
+      if (!ok) return;
+    }
+    await c.endCall();
   }
 }
