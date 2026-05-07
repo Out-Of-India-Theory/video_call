@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:stream_video_flutter/stream_video_flutter.dart';
 
 import '../active_call/active_call_controller.dart';
 import '../active_call/active_call_state.dart';
@@ -87,17 +88,24 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
   @override
   Widget build(BuildContext context) {
     final c = _controller;
-    return Stack(
-      children: [
-        widget.child,
-        if (_isMinimized && c != null)
-          widget.minimizedBuilder?.call(context, c) ??
-              MinimizedCallView(
-                controller: c,
-                onExpand: () => _onExpandRequested(context, c),
-                onEnd: () => _onEndRequested(context, c),
-              ),
-      ],
+    if (!_isMinimized || c == null) {
+      // Pass-through: avoid the FloatingViewContainer's LayoutBuilder +
+      // AnimationController overhead when there's nothing to float.
+      return widget.child;
+    }
+    final floatingView = widget.minimizedBuilder?.call(context, c) ??
+        MinimizedCallView(
+          controller: c,
+          onExpand: () => _onExpandRequested(context, c),
+          onEnd: () => _onEndRequested(context, c),
+        );
+    // Stream's FloatingViewContainer provides drag + corner-snap for free.
+    // We feed it the wrapped subtree as `child` and our card as `floatingView`.
+    return FloatingViewContainer(
+      floatingViewWidth: MinimizedCallView.width,
+      floatingViewHeight: MinimizedCallView.height,
+      floatingView: floatingView,
+      child: widget.child,
     );
   }
 

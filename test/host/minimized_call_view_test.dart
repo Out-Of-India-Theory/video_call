@@ -6,16 +6,10 @@ void main() {
   testWidgets(
     'shows Connecting placeholder when no remote participant',
     (tester) async {
-      // [MinimizedCallView] is a [Positioned] and so must live inside a
-      // [Stack] — the host widget always provides one in production.
       await tester.pumpWidget(
         const MaterialApp(
           home: Material(
-            child: Stack(
-              children: [
-                MinimizedCallView.placeholderForTest(),
-              ],
-            ),
+            child: MinimizedCallView.placeholderForTest(),
           ),
         ),
       );

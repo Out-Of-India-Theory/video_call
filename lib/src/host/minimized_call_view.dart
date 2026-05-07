@@ -3,11 +3,12 @@ import 'package:stream_video_flutter/stream_video_flutter.dart';
 
 import '../active_call/active_call_controller.dart';
 
-/// Floating mini-window rendered by [OitVideoCallHost] when the active call is
-/// minimized.
+/// Floating mini-window content rendered inside Stream's [FloatingViewContainer]
+/// by [OitVideoCallHost] when the active call is minimized.
 ///
-/// 120x160dp rounded card, dark background, draggable around the screen with
-/// safe-area clamping. Renders only the **first remote** participant
+/// Drag + corner-snap is provided by the surrounding [FloatingViewContainer];
+/// this widget renders only the inner card content (120x160dp dark Material
+/// card with rounded corners). Renders only the **first remote** participant
 /// (`participants.where((p) => !p.isLocal).firstOrNull`); the local participant
 /// is intentionally never shown here. While no remote participant is present
 /// (call still null, joining, or remote hasn't arrived yet) we show a small
@@ -15,7 +16,7 @@ import '../active_call/active_call_controller.dart';
 ///
 /// Bottom strip exposes three controls: mic toggle, end-call (red), and
 /// expand. Tapping the video area also expands.
-class MinimizedCallView extends StatefulWidget {
+class MinimizedCallView extends StatelessWidget {
   const MinimizedCallView({
     super.key,
     required this.controller,
@@ -42,94 +43,43 @@ class MinimizedCallView extends StatefulWidget {
   /// Invoked when the user taps the red end-call icon.
   final VoidCallback? onEnd;
 
-  @override
-  State<MinimizedCallView> createState() => _MinimizedCallViewState();
-}
+  /// Width passed to Stream's [FloatingViewContainer] by the host.
+  static const double width = 120;
 
-class _MinimizedCallViewState extends State<MinimizedCallView> {
-  static const double _width = 120;
-  static const double _height = 160;
-  static const double _margin = 16;
-
-  /// Initialized lazily in [didChangeDependencies] once a [MediaQuery] is
-  /// available so we can place the mini at the top-right inset.
-  Offset? _offset;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_offset == null) {
-      final media = MediaQuery.of(context);
-      _offset = Offset(
-        media.size.width - _width - _margin,
-        media.padding.top + _margin,
-      );
-    }
-  }
-
-  /// Clamps [raw] inside the safe-area-adjusted viewport for the current
-  /// [MediaQueryData]. Used both when writing on drag (so the offset never
-  /// accumulates off-screen) and when reading on build (so orientation
-  /// changes can't leave a stale offset out of bounds).
-  Offset _clampToViewport(Offset raw, MediaQueryData media) {
-    const minX = _margin;
-    final minY = media.padding.top + 8;
-    final maxXraw = media.size.width - _width - _margin;
-    final maxYraw =
-        media.size.height - _height - _margin - media.padding.bottom;
-    // Defensive: on very small screens max could fall below min.
-    final maxX = maxXraw < minX ? minX : maxXraw;
-    final maxY = maxYraw < minY ? minY : maxYraw;
-    return Offset(
-      raw.dx.clamp(minX, maxX).toDouble(),
-      raw.dy.clamp(minY, maxY).toDouble(),
-    );
-  }
+  /// Height passed to Stream's [FloatingViewContainer] by the host.
+  static const double height = 160;
 
   @override
   Widget build(BuildContext context) {
-    final media = MediaQuery.of(context);
-    // Re-clamp on read as a safety net for orientation changes; the
-    // write-time clamp in onPanUpdate already keeps drags in bounds.
-    final offset = _clampToViewport(_offset!, media);
-    final call = widget.controller?.state.call;
-
-    return Positioned(
-      left: offset.dx,
-      top: offset.dy,
-      child: GestureDetector(
-        onPanUpdate: (d) => setState(() {
-          final media = MediaQuery.of(context);
-          _offset = _clampToViewport(_offset! + d.delta, media);
-        }),
-        onTap: widget.onExpand,
-        child: Material(
-          elevation: 8,
-          color: Colors.black,
-          borderRadius: BorderRadius.circular(12),
-          clipBehavior: Clip.antiAlias,
-          child: SizedBox(
-            width: _width,
-            height: _height,
-            child: Column(
-              children: [
-                Expanded(child: _buildVideo()),
-                _buildControls(call),
-              ],
+    final call = controller?.state.call;
+    return Material(
+      elevation: 8,
+      color: Colors.black,
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: Column(
+          children: [
+            Expanded(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onExpand,
+                child: _buildVideo(),
+              ),
             ),
-          ),
+            _buildControls(call),
+          ],
         ),
       ),
     );
   }
 
   Widget _buildVideo() {
-    final controller = widget.controller;
-    if (controller == null) {
-      // placeholderForTest path.
-      return const _Placeholder();
-    }
-    final call = controller.state.call;
+    final c = controller;
+    if (c == null) return const _Placeholder();
+    final call = c.state.call;
     if (call == null) return const _Placeholder();
 
     return PartialCallStateBuilder<CallParticipantState?>(
@@ -160,7 +110,7 @@ class _MinimizedCallViewState extends State<MinimizedCallView> {
             builder: (_, isOn) => IconButton(
               iconSize: 18,
               visualDensity: VisualDensity.compact,
-              onPressed: _toggleMic,
+              onPressed: () => _toggleMic(call),
               icon: Icon(
                 isOn ? Icons.mic : Icons.mic_off,
                 color: isOn ? Colors.white : Colors.redAccent,
@@ -184,13 +134,13 @@ class _MinimizedCallViewState extends State<MinimizedCallView> {
           IconButton(
             iconSize: 18,
             visualDensity: VisualDensity.compact,
-            onPressed: widget.onEnd,
+            onPressed: onEnd,
             icon: const Icon(Icons.call_end, color: Colors.redAccent),
           ),
           IconButton(
             iconSize: 18,
             visualDensity: VisualDensity.compact,
-            onPressed: widget.onExpand,
+            onPressed: onExpand,
             icon: const Icon(Icons.fullscreen, color: Colors.white),
           ),
         ],
@@ -198,11 +148,8 @@ class _MinimizedCallViewState extends State<MinimizedCallView> {
     );
   }
 
-  Future<void> _toggleMic() async {
-    final call = widget.controller?.state.call;
-    if (call == null) return;
-    final isOn =
-        call.state.value.localParticipant?.isAudioEnabled ?? false;
+  Future<void> _toggleMic(Call call) async {
+    final isOn = call.state.value.localParticipant?.isAudioEnabled ?? false;
     await call.setMicrophoneEnabled(enabled: !isOn);
   }
 }

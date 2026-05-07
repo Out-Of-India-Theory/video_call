@@ -3,6 +3,10 @@
 ## 1.1.0
 
 - **feat**: in-app Picture-in-Picture. Wrap `MaterialApp` with `OitVideoCallHost`.
+  Floating mini-window with corner-snap (built on Stream's
+  `FloatingViewContainer`), reactive mic icon, end / expand controls,
+  remote-participant-only video, auto-dismiss on natural disconnect, and
+  `fastReconnecting` ↔ `connected` mode tracking.
 - **change**: Back press while connected now minimizes instead of triggering `confirmLeave`. End-Call button still uses `confirmLeave`.
 - **refactor**: call lifecycle moved out of `CallScreen` into `ActiveCallController` so it survives `Navigator.pop`.
 - Phase 1 permission denial now always shows "Open Settings" (Retry is gone).
