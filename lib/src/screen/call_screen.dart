@@ -106,6 +106,15 @@ class _CallScreenState extends State<CallScreen> {
     // Disabled in dispose. Fire-and-forget — wakelock_plus catches platform
     // exceptions internally and we don't want to gate _start() on it.
     WakelockPlus.enable();
+    // If we were just remounted via tap-to-expand from the host's mini
+    // overlay, the controller is in `minimized` mode. Flip it back to
+    // `connected` here (rather than from the host) so the mini overlay
+    // doesn't disappear for a frame before this screen has rendered. The
+    // call already has a live `Call`, so `_start()` below short-circuits
+    // through `connectAndJoin`'s "already connected" branch.
+    if (_controller.state.mode == ActiveCallMode.minimized) {
+      _controller.expand();
+    }
     _start();
   }
 

@@ -7,13 +7,47 @@ import 'models/video_user.dart';
 import 'screen/call_screen.dart';
 import 'screen/error_view.dart';
 
+/// Snapshot of the parameters last passed to [OitVideoCall.callScreen].
+///
+/// Cached on the facade so the plugin-handled tap-to-expand fallback in
+/// [OitVideoCallHost] can rebuild an equivalent [CallScreen] without the host
+/// app having to re-supply the call id, type, etc.
+///
+/// Read it via [OitVideoCall.lastArgsOrNull]. The fields are intentionally
+/// the surface area of [OitVideoCall.callScreen] so apps and the host stay in
+/// sync if either side adds a new argument.
+class CallScreenArgs {
+  const CallScreenArgs({
+    required this.callId,
+    required this.callType,
+    required this.audioOnly,
+    required this.createIfMissing,
+    required this.onCallEnded,
+    required this.confirmLeave,
+  });
+
+  final String callId;
+  final String callType;
+  final bool audioOnly;
+  final bool createIfMissing;
+  final VoidCallback? onCallEnded;
+  final Future<bool> Function(BuildContext context)? confirmLeave;
+}
+
 class OitVideoCall {
   OitVideoCall._();
 
   static OitVideoCallConfig? _config;
   static ActiveCallController? _controller;
+  static CallScreenArgs? _lastArgs;
 
   static bool get isInitialized => _config != null;
+
+  /// The arguments most recently passed to [callScreen], or `null` if the
+  /// call screen has never been built in this process. Read-only — the host
+  /// uses this to rebuild [CallScreen] when expanding from the minimized view
+  /// without the app having wired its own [OitVideoCallHost.onExpandRequested].
+  static CallScreenArgs? get lastArgsOrNull => _lastArgs;
 
   static OitVideoCallConfig get configOrThrow {
     final c = _config;
@@ -48,6 +82,7 @@ class OitVideoCall {
     await _controller?.endCall();
     _controller = null;
     _config = null;
+    _lastArgs = null;
   }
 
   static Widget callScreen({
@@ -67,6 +102,17 @@ class OitVideoCall {
         ),
       );
     }
+    // Cache for the plugin-handled tap-to-expand fallback in
+    // [OitVideoCallHost]. Updated on every call so the most recently mounted
+    // call screen wins (the only one that can be live).
+    _lastArgs = CallScreenArgs(
+      callId: callId,
+      callType: callType,
+      audioOnly: audioOnly,
+      createIfMissing: createIfMissing,
+      onCallEnded: onCallEnded,
+      confirmLeave: confirmLeave,
+    );
     return CallScreen(
       config: _config!,
       controller: _controller!,

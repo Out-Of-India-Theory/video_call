@@ -523,4 +523,58 @@ void main() {
     expect(hosted.controller.state.mode, priorMode);
     expect(hosted.controller.state.mode, isNot(ActiveCallMode.minimized));
   });
+
+  // -----------------------------------------------------------------
+  // Task 6: tap minimized → expand. The host pushes a fresh CallScreen
+  // (or the app does so via onExpandRequested); when that CallScreen
+  // mounts, its `initState` flips the controller back to `connected` so
+  // the host's mini overlay disappears in lock-step with the route push.
+  // -----------------------------------------------------------------
+
+  testWidgets('initState flips minimized → connected on remount', (tester) async {
+    final session = FakeCallSession();
+    final gate = FakePermissionGate();
+
+    _swallowRenderPhaseMockErrors();
+
+    // Step 1: mount the original screen and connect.
+    final hosted = _host(config: _config(), session: session, gate: gate);
+    await tester.pumpWidget(hosted.widget);
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    expect(hosted.controller.state.mode, ActiveCallMode.connected);
+
+    // Step 2: minimize and tear the original screen down (mirrors what
+    // happens when the user back-presses while connected).
+    expect(hosted.controller.minimize(), isTrue);
+    expect(hosted.controller.state.mode, ActiveCallMode.minimized);
+    await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+    await tester.pump();
+    // Controller is still minimized (its mode survives the unmount).
+    expect(hosted.controller.state.mode, ActiveCallMode.minimized);
+
+    // Step 3: mount a fresh CallScreen for the same controller — the
+    // tap-to-expand path. Its `initState` should flip the controller out
+    // of minimized mode without waiting for `connectAndJoin` to resolve.
+    await tester.pumpWidget(MaterialApp(
+      home: CallScreen(
+        config: _config(),
+        controller: hosted.controller,
+        callId: 'c1',
+        callType: 'default',
+        audioOnly: false,
+        deps: CallScreenDeps(permissionGate: gate),
+      ),
+    ));
+    // No `await tester.pump()` between pumpWidget and the assertion —
+    // initState runs synchronously during element mount.
+    expect(hosted.controller.state.mode, ActiveCallMode.connected);
+
+    // Drain microtasks so the late `_start()` Future doesn't trip the
+    // pending-timer guard at teardown.
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+  });
 }

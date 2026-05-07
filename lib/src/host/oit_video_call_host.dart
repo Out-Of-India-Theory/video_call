@@ -94,7 +94,7 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
           widget.minimizedBuilder?.call(context, c) ??
               MinimizedCallView(
                 controller: c,
-                onExpand: () => _onExpandRequested(c),
+                onExpand: () => _onExpandRequested(context, c),
                 // Refined in Task 7 — for now this just ends the call without
                 // a confirm prompt.
                 onEnd: () async => c.endCall(),
@@ -103,10 +103,49 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
     );
   }
 
-  void _onExpandRequested(ActiveCallController c) {
-    // Refined in Task 6 (route-pushing). For now we just flip the controller
-    // out of minimized mode and notify the optional app-level callback.
-    c.expand();
-    widget.onExpandRequested?.call();
+  /// Two paths:
+  ///
+  ///   1. **App-handled** — when [OitVideoCallHost.onExpandRequested] is
+  ///      non-null, the app pushes its own call route (auto_route /
+  ///      go_router) so the navigator stack stays consistent with its
+  ///      router state.
+  ///   2. **Plugin-handled fallback** — push a [MaterialPageRoute] onto the
+  ///      root [Navigator] that rebuilds the call screen using the args
+  ///      cached on [OitVideoCall.lastArgsOrNull].
+  ///
+  /// The host does *not* call `c.expand()` directly. Both paths cause a new
+  /// [CallScreen] to be mounted, and that screen flips the controller back
+  /// to `connected` in its `initState` — at which point the host's listener
+  /// removes this overlay. Doing the flip from the screen avoids a one-frame
+  /// gap where the mini disappears before the route has rendered.
+  ///
+  /// The full route-pushing flow is exercised manually via the example app
+  /// smoke test in Task 9; see `test/screen/call_screen_test.dart` for the
+  /// `initState` flip unit test.
+  void _onExpandRequested(BuildContext context, ActiveCallController c) {
+    if (widget.onExpandRequested != null) {
+      widget.onExpandRequested!();
+      return;
+    }
+    // Plugin-handled fallback path. Should always have args because the
+    // only way to reach `minimized` mode is via a connected call, which in
+    // turn requires `OitVideoCall.callScreen()` to have been mounted at
+    // least once. Guarded defensively all the same — if for any reason the
+    // facade was reset while a mini is still on screen, we'd rather no-op
+    // than crash.
+    final args = OitVideoCall.lastArgsOrNull;
+    if (args == null) return;
+    Navigator.of(context, rootNavigator: true).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => OitVideoCall.callScreen(
+          callId: args.callId,
+          callType: args.callType,
+          audioOnly: args.audioOnly,
+          createIfMissing: args.createIfMissing,
+          onCallEnded: args.onCallEnded,
+          confirmLeave: args.confirmLeave,
+        ),
+      ),
+    );
   }
 }
