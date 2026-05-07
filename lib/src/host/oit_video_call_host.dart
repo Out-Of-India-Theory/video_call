@@ -156,14 +156,21 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
   /// while a mini was still on screen) we fall through to [endCall] directly,
   /// which keeps the historical "tap End → call ends" behavior for hosts that
   /// haven't opted into a confirmation dialog.
+  ///
+  /// The `mode != minimized` guard at the top serializes concurrent invocations:
+  /// a double-tap on End sends one through the confirm prompt and short-circuits
+  /// the second once `endCall` has flipped the controller out of `minimized`.
+  /// It also defends against future natural-disconnect handlers flipping the
+  /// mode while the user's confirmLeave sheet is open.
   Future<void> _onEndRequested(
     BuildContext context,
     ActiveCallController c,
   ) async {
+    if (c.state.mode != ActiveCallMode.minimized) return;
     final confirm = OitVideoCall.lastArgsOrNull?.confirmLeave;
     if (confirm != null) {
       final ok = await confirm(context);
-      if (!ok) return;
+      if (!ok || !mounted) return;
     }
     await c.endCall();
   }

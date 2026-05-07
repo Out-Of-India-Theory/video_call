@@ -21,7 +21,7 @@ ActiveCallController _setupSingletonInMinimized({
   Future<bool> Function(BuildContext)? confirmLeave,
 }) {
   final controller = ActiveCallController(session: session);
-  OitVideoCall.debugInitForTest(config: _config(), controller: controller);
+  OitVideoCall.initForTest(config: _config(), controller: controller);
 
   // Cache args so the host's `_onEndRequested` can read `confirmLeave`. The
   // returned widget is intentionally unused: only the side effect of
@@ -34,7 +34,7 @@ ActiveCallController _setupSingletonInMinimized({
 
   // Flip directly into `minimized` without a live Call so the mini's video
   // and mic builders fall into the placeholder branches.
-  controller.debugForceMinimizedForTest(callId: 'c1', callType: 'default');
+  controller.forceMinimizedForTest(callId: 'c1', callType: 'default');
   expect(controller.state.mode, ActiveCallMode.minimized);
   expect(controller.state.call, isNull);
   return controller;

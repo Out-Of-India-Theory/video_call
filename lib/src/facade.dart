@@ -84,7 +84,7 @@ class OitVideoCall {
   /// before pumping [OitVideoCallHost]. Production code paths through [init]
   /// are unaffected.
   @visibleForTesting
-  static void debugInitForTest({
+  static void initForTest({
     required OitVideoCallConfig config,
     required ActiveCallController controller,
   }) {

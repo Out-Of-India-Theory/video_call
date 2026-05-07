@@ -226,7 +226,7 @@ class ActiveCallController extends ChangeNotifier {
   /// "no call yet" branch and renders its placeholders for video and mic,
   /// while leaving the End button and host wiring fully intact.
   @visibleForTesting
-  void debugForceMinimizedForTest({
+  void forceMinimizedForTest({
     required String callId,
     required String callType,
     bool audioOnly = false,
