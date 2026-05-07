@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:oit_video_call/src/active_call/active_call_controller.dart';
 import 'package:oit_video_call/src/config.dart';
 import 'package:oit_video_call/src/models/video_user.dart';
 import 'package:oit_video_call/src/screen/call_screen.dart';
@@ -15,7 +16,7 @@ OitVideoCallConfig _config({Future<String> Function()? tokenProvider}) =>
       tokenProvider: tokenProvider ?? (() async => 'jwt'),
     );
 
-Widget _host({
+({Widget widget, ActiveCallController controller}) _host({
   required OitVideoCallConfig config,
   required FakeCallSession session,
   required FakePermissionGate gate,
@@ -23,19 +24,23 @@ Widget _host({
   bool createIfMissing = false,
   Future<bool> Function()? openSettings,
 }) {
-  return MaterialApp(
-    home: CallScreen(
-      config: config,
-      callId: 'c1',
-      callType: 'default',
-      audioOnly: audioOnly,
-      createIfMissing: createIfMissing,
-      deps: CallScreenDeps(
-        session: session,
-        permissionGate: gate,
-        openSettings: openSettings,
+  final controller = ActiveCallController(session: session);
+  return (
+    widget: MaterialApp(
+      home: CallScreen(
+        config: config,
+        controller: controller,
+        callId: 'c1',
+        callType: 'default',
+        audioOnly: audioOnly,
+        createIfMissing: createIfMissing,
+        deps: CallScreenDeps(
+          permissionGate: gate,
+          openSettings: openSettings,
+        ),
       ),
     ),
+    controller: controller,
   );
 }
 
@@ -45,7 +50,7 @@ void main() {
     final gate = FakePermissionGate()
       ..result = const PermissionResult(granted: false, permanentlyDenied: false);
 
-    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate).widget);
     await tester.pumpAndSettle();
 
     expect(find.textContaining('required'), findsOneWidget);
@@ -58,7 +63,7 @@ void main() {
     final gate = FakePermissionGate()
       ..result = const PermissionResult(granted: false, permanentlyDenied: true);
 
-    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate).widget);
     await tester.pumpAndSettle();
 
     expect(find.textContaining('required'), findsOneWidget);
@@ -76,7 +81,7 @@ void main() {
       session: session,
       gate: gate,
       audioOnly: true,
-    ));
+    ).widget);
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Microphone'), findsOneWidget);
@@ -102,7 +107,7 @@ void main() {
       session: session,
       gate: gate,
       audioOnly: true,
-    ));
+    ).widget);
     // Don't pumpAndSettle — _Ready triggers StreamCallContainer which will
     // invoke mocked Call methods and throw. Pump just enough for the async
     // phase chain to complete.
@@ -134,7 +139,7 @@ void main() {
       session: session,
       gate: gate,
       audioOnly: false,
-    ));
+    ).widget);
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 10));
     }
@@ -151,7 +156,7 @@ void main() {
       config: _config(tokenProvider: () => Future.error(Exception('500'))),
       session: session,
       gate: gate,
-    ));
+    ).widget);
     await tester.pumpAndSettle();
 
     expect(find.textContaining('token'), findsOneWidget);
@@ -162,7 +167,7 @@ void main() {
     final session = FakeCallSession()..connectError = Exception('boom');
     final gate = FakePermissionGate();
 
-    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate).widget);
     await tester.pumpAndSettle();
 
     expect(find.textContaining('connect'), findsOneWidget);
@@ -173,7 +178,7 @@ void main() {
     final session = FakeCallSession()..getCallNotFound = true;
     final gate = FakePermissionGate();
 
-    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate).widget);
     await tester.pumpAndSettle();
 
     expect(find.textContaining('not available'), findsOneWidget);
@@ -183,7 +188,7 @@ void main() {
     final session = FakeCallSession()..getCallError = Exception('boom');
     final gate = FakePermissionGate();
 
-    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate).widget);
     await tester.pumpAndSettle();
 
     expect(find.textContaining('load call'), findsOneWidget);
@@ -193,7 +198,7 @@ void main() {
     final session = FakeCallSession()..joinError = Exception('rtc fail');
     final gate = FakePermissionGate();
 
-    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate).widget);
     await tester.pumpAndSettle();
 
     expect(find.textContaining('join'), findsOneWidget);
@@ -213,7 +218,7 @@ void main() {
     };
     addTearDown(() => FlutterError.onError = priorOnError);
 
-    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate).widget);
     // Don't pumpAndSettle — _Ready triggers StreamCallContainer with a Mock Call.
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 10));
@@ -223,7 +228,12 @@ void main() {
     expect(session.joinCount, 1);
   });
 
-  testWidgets('dispose calls leaveCall + dispose on session', (tester) async {
+  testWidgets('dispose does NOT leave the call (controller owns lifecycle)', (tester) async {
+    // After Task 2, CallScreen's dispose no longer ends the call — the
+    // controller owns the lifecycle and outlives the route. The screen only
+    // detaches its listener. leaveCall/dispose are now triggered by
+    // controller.endCall() (e.g. from OitVideoCall.reset() or, in future
+    // tasks, from the host app's "leave" wiring).
     final session = FakeCallSession();
     final gate = FakePermissionGate();
 
@@ -237,7 +247,8 @@ void main() {
     };
     addTearDown(() => FlutterError.onError = priorOnError);
 
-    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
+    final hosted = _host(config: _config(), session: session, gate: gate);
+    await tester.pumpWidget(hosted.widget);
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 10));
     }
@@ -246,6 +257,12 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: SizedBox()));
     await tester.pump();
 
+    expect(session.leaveCount, 0);
+    expect(session.disposeCount, 0);
+
+    // But endCall on the controller does end it — proving the lifecycle is
+    // intact, just relocated.
+    await hosted.controller.endCall();
     expect(session.leaveCount, 1);
     expect(session.disposeCount, 1);
   });
@@ -264,7 +281,7 @@ void main() {
     };
     addTearDown(() => FlutterError.onError = priorOnError);
 
-    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate).widget);
     await tester.pumpAndSettle();
 
     // First attempt failed at phase 3.
@@ -304,7 +321,7 @@ void main() {
       session: session,
       gate: gate,
       createIfMissing: true,
-    ));
+    ).widget);
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 10));
     }
@@ -324,7 +341,7 @@ void main() {
       session: session,
       gate: gate,
       createIfMissing: true,
-    ));
+    ).widget);
     await tester.pumpAndSettle();
 
     expect(session.getOrCreateCount, 1);
@@ -339,7 +356,7 @@ void main() {
     final session = FakeCallSession()..getCallNotFound = true;
     final gate = FakePermissionGate();
 
-    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate));
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate).widget);
     await tester.pumpAndSettle();
 
     expect(find.textContaining('not available'), findsOneWidget);

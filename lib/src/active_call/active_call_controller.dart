@@ -1,6 +1,27 @@
 import 'package:flutter/foundation.dart';
+import 'package:stream_video_flutter/stream_video_flutter.dart';
 
+import '../config.dart';
+import '../errors.dart';
+import '../screen/call_session.dart';
 import 'active_call_state.dart';
+
+/// Returned by [ActiveCallController.connectAndJoin] so the screen knows
+/// what to render: ready (call live), or errored.
+sealed class ConnectResult {}
+
+class ConnectReady extends ConnectResult {
+  ConnectReady(this.call);
+
+  final Call call;
+}
+
+class ConnectErrored extends ConnectResult {
+  ConnectErrored(this.code, this.message);
+
+  final OitVideoCallErrorCode code;
+  final String message;
+}
 
 /// Owns the lifetime of the in-flight call so it survives `Navigator.pop`.
 ///
@@ -8,15 +29,121 @@ import 'active_call_state.dart';
 /// For in-app PiP the call must outlive the route — when the user taps back
 /// or "minimize", we pop the route but the connection stays alive and the
 /// host renders [MinimizedCallView] above the navigator.
-///
-/// This skeleton task ships only state-machine plumbing. Network I/O and
-/// `Call` ownership are added in Task 2.
 class ActiveCallController extends ChangeNotifier {
-  ActiveCallController();
+  /// Defaults to [StreamCallSession] so production callers don't need to
+  /// think about it; tests pass a [FakeCallSession] (or any other
+  /// [CallSession] impl).
+  ActiveCallController({CallSession? session})
+      : _session = session ?? StreamCallSession();
+
+  final CallSession _session;
 
   ActiveCallState _state = ActiveCallState.idle;
   ActiveCallState get state => _state;
 
+  /// Phases 2–5 of the v1 `_start()`: token → connect → getCall → join.
+  /// On success, mode flips to `connected` and `state.call` is non-null.
+  ///
+  /// Throws [StateError] if invoked with a different `callId` while another
+  /// call is already in progress; if the same `callId` is re-entered after a
+  /// successful connect, the existing live [Call] is returned via
+  /// [ConnectReady] and no new I/O is performed.
+  ///
+  /// To retry after a [ConnectErrored] result, callers must invoke [reset]
+  /// first (the controller refuses to re-connect when the state isn't
+  /// `idle`).
+  Future<ConnectResult> connectAndJoin({
+    required OitVideoCallConfig config,
+    required String callId,
+    required String callType,
+    required bool audioOnly,
+    required bool createIfMissing,
+  }) async {
+    if (_state.mode == ActiveCallMode.idle) {
+      _state = ActiveCallState(
+        mode: ActiveCallMode.connecting,
+        callId: callId,
+        callType: callType,
+        audioOnly: audioOnly,
+      );
+      notifyListeners();
+    } else if (_state.callId != callId) {
+      // Re-entering with a different call id while another is active is a
+      // bug at the host-app level; bail loudly.
+      throw StateError(
+        'Active call already in progress for ${_state.callId}; '
+        'cannot start $callId.',
+      );
+    } else if (_state.call != null) {
+      // Already connected — observer is just re-mounting (e.g. tap-to-expand).
+      return ConnectReady(_state.call!);
+    }
+
+    // Phase 2: token
+    final String token;
+    try {
+      token = await config.tokenProvider();
+    } catch (_) {
+      return ConnectErrored(
+        OitVideoCallErrorCode.tokenFetchFailed,
+        'Could not fetch call token.',
+      );
+    }
+
+    // Phase 3: connect
+    try {
+      final user = User.regular(
+        userId: config.user.id,
+        name: config.user.name,
+        image: config.user.image,
+      );
+      await _session.connect(apiKey: config.apiKey, user: user, token: token);
+    } catch (_) {
+      return ConnectErrored(
+        OitVideoCallErrorCode.joinFailed,
+        'Could not connect to call service.',
+      );
+    }
+
+    // Phase 4: get / get-or-create
+    final Call call;
+    try {
+      call = createIfMissing
+          ? await _session.getOrCreateCall(callType: callType, callId: callId)
+          : await _session.getCall(callType: callType, callId: callId);
+    } on CallNotFoundError {
+      return ConnectErrored(
+        OitVideoCallErrorCode.callNotFound,
+        'Call not available.',
+      );
+    } catch (_) {
+      return ConnectErrored(
+        OitVideoCallErrorCode.joinFailed,
+        createIfMissing ? 'Could not start call.' : 'Could not load call.',
+      );
+    }
+
+    // Phase 5: join
+    try {
+      await _session.joinCall(call);
+      if (audioOnly) {
+        await _session.setCameraEnabled(call, false);
+      }
+    } catch (_) {
+      return ConnectErrored(
+        OitVideoCallErrorCode.joinFailed,
+        'Could not join call.',
+      );
+    }
+
+    _state = _state.copyWith(mode: ActiveCallMode.connected, call: call);
+    notifyListeners();
+    return ConnectReady(call);
+  }
+
+  /// Kept for callers that want to flip into `connecting` without performing
+  /// I/O (e.g. unit tests, future-task host-app code). [connectAndJoin] does
+  /// this transition internally for you.
   void beginConnecting({
     required String callId,
     required String callType,
@@ -57,6 +184,27 @@ class ActiveCallController extends ChangeNotifier {
     return true;
   }
 
+  /// Permanent end. Tears down the SDK call, resets state, notifies.
+  Future<void> endCall() async {
+    final call = _state.call;
+    _state = _state.copyWith(mode: ActiveCallMode.ending);
+    notifyListeners();
+    if (call != null) {
+      try {
+        await _session.leaveCall(call);
+      } catch (_) {
+        // best-effort
+      }
+    }
+    await _session.dispose();
+    _state = ActiveCallState.idle;
+    notifyListeners();
+  }
+
+  /// Synchronous reset — used in tests and during host-app sign-out where
+  /// no live `Call` exists, and to allow [connectAndJoin] to be retried
+  /// after a [ConnectErrored] result. Production code that has a live call
+  /// should prefer [endCall].
   void reset() {
     _state = ActiveCallState.idle;
     notifyListeners();

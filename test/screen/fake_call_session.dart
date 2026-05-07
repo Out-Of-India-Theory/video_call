@@ -21,6 +21,7 @@ class FakeCallSession implements CallSession {
   Object? getOrCreateError;
 
   Object? joinError;
+  Object? leaveError;
 
   // Observable state.
   int connectCount = 0;
@@ -82,6 +83,7 @@ class FakeCallSession implements CallSession {
   @override
   Future<void> leaveCall(Call call) async {
     leaveCount++;
+    if (leaveError != null) throw leaveError!;
   }
 
   @override

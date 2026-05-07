@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart' show StreamVideo;
+import 'active_call/active_call_controller.dart';
 import 'config.dart';
 import 'errors.dart';
 import 'models/video_user.dart';
@@ -10,11 +11,20 @@ class OitVideoCall {
   OitVideoCall._();
 
   static OitVideoCallConfig? _config;
+  static ActiveCallController? _controller;
 
   static bool get isInitialized => _config != null;
 
   static OitVideoCallConfig get configOrThrow {
     final c = _config;
+    if (c == null) {
+      throw StateError('OitVideoCall.init() has not been called.');
+    }
+    return c;
+  }
+
+  static ActiveCallController get controllerOrThrow {
+    final c = _controller;
     if (c == null) {
       throw StateError('OitVideoCall.init() has not been called.');
     }
@@ -31,14 +41,16 @@ class OitVideoCall {
       user: user,
       tokenProvider: tokenProvider,
     );
+    _controller = ActiveCallController();
   }
 
   static Future<void> reset() async {
+    await _controller?.endCall();
+    _controller = null;
     _config = null;
     await StreamVideo.reset();
   }
 
-  // callScreen() is added in Task 11.
   static Widget callScreen({
     required String callId,
     bool audioOnly = false,
@@ -47,7 +59,7 @@ class OitVideoCall {
     VoidCallback? onCallEnded,
     Future<bool> Function(BuildContext context)? confirmLeave,
   }) {
-    if (_config == null) {
+    if (_config == null || _controller == null) {
       return const Scaffold(
         body: ErrorView(
           code: OitVideoCallErrorCode.notInitialized,
@@ -58,6 +70,7 @@ class OitVideoCall {
     }
     return CallScreen(
       config: _config!,
+      controller: _controller!,
       callId: callId,
       callType: callType,
       audioOnly: audioOnly,
