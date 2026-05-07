@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0
+## 1.2.0
 
 - **feat**: in-app Picture-in-Picture. Wrap `MaterialApp` with `OitVideoCallHost`.
   Floating mini-window with corner-snap (built on Stream's
