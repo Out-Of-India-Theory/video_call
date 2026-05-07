@@ -40,6 +40,14 @@ class OitVideoCall {
   static ActiveCallController? _controller;
   static CallScreenArgs? _lastArgs;
 
+  /// Notifies subscribers when [_controller] is replaced (init, initForTest,
+  /// or reset). [OitVideoCallHost] uses this to attach lazily — apps can
+  /// mount the host before calling [init] (e.g. wrapping `MaterialApp.builder`
+  /// at app startup while [init] runs after login) and the host will hook up
+  /// the moment [init] runs.
+  static final ValueNotifier<ActiveCallController?>
+      activeControllerListenable = ValueNotifier<ActiveCallController?>(null);
+
   static bool get isInitialized => _config != null;
 
   /// The arguments most recently passed to [callScreen], or `null` if the
@@ -75,6 +83,7 @@ class OitVideoCall {
       tokenProvider: tokenProvider,
     );
     _controller = ActiveCallController();
+    activeControllerListenable.value = _controller;
   }
 
   /// Test-only setup that lets host-widget tests bring their own
@@ -89,6 +98,7 @@ class OitVideoCall {
   }) {
     _config = config;
     _controller = controller;
+    activeControllerListenable.value = _controller;
   }
 
   static Future<void> reset() async {
@@ -96,6 +106,7 @@ class OitVideoCall {
     _controller = null;
     _config = null;
     _lastArgs = null;
+    activeControllerListenable.value = null;
   }
 
   static Widget callScreen({

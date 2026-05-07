@@ -128,9 +128,11 @@ fallback uses Material transitions only.
 
 ### Initialization order
 
-Call `OitVideoCall.init(...)` **before** mounting `OitVideoCallHost`. The host
-attaches its controller listener once in `initState`; later calls to `init()`
-are not observed and the host will silently never show PiP.
+`OitVideoCall.init(...)` and `OitVideoCallHost` can be wired in either order.
+The host listens to `OitVideoCall.activeControllerListenable`, so apps that
+init at startup *and* apps that init lazily (e.g. inside a "Join Call" handler
+once the user profile is loaded) both work — the host attaches the moment
+`init()` runs.
 
 ### `confirmLeave` context lifetime
 

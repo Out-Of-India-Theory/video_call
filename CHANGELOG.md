@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.1
+
+- **fix**: `OitVideoCallHost` now attaches lazily via
+  `OitVideoCall.activeControllerListenable`. Apps can call `OitVideoCall.init`
+  AFTER mounting the host (e.g. lazily on the first "Join Call" tap once the
+  user profile is loaded) and the host will hook up correctly. Previously the
+  host only attached if init had already run by `initState` time.
+
 ## 1.2.0
 
 - **feat**: in-app Picture-in-Picture. Wrap `MaterialApp` with `OitVideoCallHost`.

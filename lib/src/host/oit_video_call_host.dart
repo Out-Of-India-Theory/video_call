@@ -19,9 +19,10 @@ import 'minimized_call_view.dart';
 /// When [ActiveCallController.state.mode] is `minimized`, a draggable mini
 /// window floats above the navigator. Otherwise the host is a no-op pass-through.
 ///
-/// **Important:** Call [OitVideoCall.init] *before* mounting this widget. The
-/// host attaches its controller listener once in `initState`; later calls to
-/// `init()` are not observed and the host will silently never show PiP.
+/// The host listens to [OitVideoCall.activeControllerListenable], so it works
+/// whether [OitVideoCall.init] is called before this widget mounts (typical
+/// for apps that init at startup) or after (typical for apps that init
+/// lazily, e.g. on the first "Join Call" tap once the user profile is loaded).
 class OitVideoCallHost extends StatefulWidget {
   const OitVideoCallHost({
     super.key,
@@ -64,17 +65,36 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
   @override
   void initState() {
     super.initState();
-    if (OitVideoCall.isInitialized) {
-      _controller = OitVideoCall.controllerOrThrow
-        ..addListener(_onChange);
-      _isMinimized = _controller?.state.mode == ActiveCallMode.minimized;
-    }
+    OitVideoCall.activeControllerListenable.addListener(_onActiveControllerChanged);
+    _attachToActiveController();
   }
 
   @override
   void dispose() {
+    OitVideoCall.activeControllerListenable.removeListener(_onActiveControllerChanged);
     _controller?.removeListener(_onChange);
     super.dispose();
+  }
+
+  /// Fires when [OitVideoCall.init], [OitVideoCall.initForTest], or
+  /// [OitVideoCall.reset] swap the active controller. We re-attach so apps
+  /// that mount the host before calling `init()` still get PiP wired up.
+  void _onActiveControllerChanged() {
+    if (!mounted) return;
+    _attachToActiveController();
+  }
+
+  void _attachToActiveController() {
+    final next = OitVideoCall.activeControllerListenable.value;
+    if (identical(next, _controller)) return;
+    _controller?.removeListener(_onChange);
+    _controller = next;
+    _controller?.addListener(_onChange);
+    final shouldMinimize =
+        _controller?.state.mode == ActiveCallMode.minimized;
+    if (shouldMinimize != _isMinimized) {
+      setState(() => _isMinimized = shouldMinimize);
+    }
   }
 
   void _onChange() {
