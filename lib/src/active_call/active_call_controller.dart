@@ -206,27 +206,27 @@ class ActiveCallController extends ChangeNotifier {
     }
 
     _state = _state.copyWith(mode: ActiveCallMode.connected, call: call);
-    notifyListeners();
 
-    // Subscribe to SDK call state so a natural disconnect (server ended,
-    // network drop, duration timeout) tears the controller down even when
-    // we're minimized — the full-screen [CallScreen] only handles disconnect
-    // when its `_Ready` branch is mounted. We `unawaited` any stale
-    // subscription's cancel (defense-in-depth; the cleanup branches null
-    // it out already) because awaiting `StreamSubscription.cancel` deadlocks
-    // a `flutter_test` `FakeAsync` zone — see [endCall] for details.
+    // Subscribe BEFORE notifyListeners so a synchronous observer that calls
+    // endCall() inside its listener finds the subscription already in place
+    // (and gets cancelled cleanly by endCall) rather than seeing it appear
+    // afterward and leaking. We `unawaited` any stale subscription's cancel
+    // (defense-in-depth; cleanup branches above null it out already) because
+    // awaiting `StreamSubscription.cancel` deadlocks a `flutter_test`
+    // `FakeAsync` zone — see [endCall] for details.
     final stale = _callStateSub;
     _callStateSub = null;
     if (stale != null) unawaited(stale.cancel());
     _callStateSub = call.state.listen(_onSdkCallStateChanged);
 
+    notifyListeners();
     return ConnectReady(call);
   }
 
   /// Reacts to the SDK's `Call.state` updates.
   ///
-  /// * `disconnected` → [endCall] (idempotent across the existing
-  ///   [_leaveInProgress]-style guards in callers).
+  /// * `disconnected` → [endCall] (the leave-in-progress guard inside
+  ///   `CallScreen` keeps re-entry idempotent).
   /// * `fastReconnecting` while we're `connected` → flip to
   ///   `fastReconnecting` (the back-press matrix in [CallScreen]
   ///   distinguishes the two modes).
