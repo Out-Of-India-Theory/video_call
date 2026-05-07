@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
 
+- **feat**: in-app Picture-in-Picture. Wrap `MaterialApp` with `OitVideoCallHost`.
+- **change**: Back press while connected now minimizes instead of triggering `confirmLeave`. End-Call button still uses `confirmLeave`.
+- **refactor**: call lifecycle moved out of `CallScreen` into `ActiveCallController` so it survives `Navigator.pop`.
 - Phase 1 permission denial now always shows "Open Settings" (Retry is gone).
   Retry was unreliable cross-platform: iOS returns "denied" immediately on
   subsequent `request()` calls without re-prompting, and on Android once the

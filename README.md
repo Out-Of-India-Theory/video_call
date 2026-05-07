@@ -83,10 +83,65 @@ Navigator.push(
 - WebSocket opens on screen mount, closes on dispose. There is no persistent
   connection between calls.
 
+## In-app Picture-in-Picture
+
+Wrap your `MaterialApp` with `OitVideoCallHost` to enable the floating mini-window:
+
+```dart
+MaterialApp.router(
+  builder: (ctx, child) => OitVideoCallHost(
+    child: child!,
+    // Optional — wire to your router when using auto_route / go_router:
+    onExpandRequested: () => context.router.push(VideoCallRoute(callId: ...)),
+  ),
+  ...
+)
+```
+
+Behavior:
+- **Back press** while a call is connected → minimizes (no confirm).
+- **End-Call** button → still triggers `confirmLeave`.
+- **Tap** the mini view → expands back to full screen.
+- The mini view shows **the remote participant only**.
+
+### Routing integration
+
+Apps using `auto_route` or `go_router` should always supply `onExpandRequested`:
+
+```dart
+OitVideoCallHost(
+  child: child!,
+  onExpandRequested: () => context.router.push(VideoCallRoute(callId: ...)),
+)
+```
+
+The plugin-handled fallback (when `onExpandRequested` is null) pushes a
+`MaterialPageRoute` onto the root Navigator using
+`Navigator.of(context, rootNavigator: true)`. This works for plain
+`MaterialApp` setups but may bypass your custom router's bookkeeping —
+your router cannot pop or track the pushed route. Cupertino-styled apps
+should also wire this callback to get iOS-style transitions, since the
+fallback uses Material transitions only.
+
+### Initialization order
+
+Call `OitVideoCall.init(...)` **before** mounting `OitVideoCallHost`. The host
+attaches its controller listener once in `initState`; later calls to `init()`
+are not observed and the host will silently never show PiP.
+
+### `confirmLeave` context lifetime
+
+The `confirmLeave: (BuildContext context) => ...` closure is invoked from
+multiple surfaces (the in-call End button, the back-press flow during
+connecting, and — new in 1.1.0 — the mini-view End button). Always use the
+`BuildContext` parameter rather than a captured context, since the closure may
+be invoked from a different widget tree than the one that built
+`OitVideoCall.callScreen(...)`.
+
 ## Out of scope (v1)
 
 - Push notifications / incoming-call ringing
-- Picture-in-picture / background calling
+- Background calling (system-level PiP)
 - Custom theming
 - Group calls, screen share, recording
 - Web / desktop platforms
