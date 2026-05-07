@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../active_call/active_call_controller.dart';
 import '../active_call/active_call_state.dart';
 import '../facade.dart';
+import 'minimized_call_view.dart';
 
 /// Host widget that renders the in-app PiP overlay above the app's navigator.
 ///
@@ -32,7 +33,7 @@ class OitVideoCallHost extends StatefulWidget {
   final Widget child;
 
   /// Optional override for the minimized view. Defaults to
-  /// [DefaultMinimizedCallView] (Task 4).
+  /// [MinimizedCallView].
   final Widget Function(
     BuildContext context,
     ActiveCallController controller,
@@ -53,12 +54,19 @@ class OitVideoCallHost extends StatefulWidget {
 class _OitVideoCallHostState extends State<OitVideoCallHost> {
   ActiveCallController? _controller;
 
+  /// Cached projection of `controller.state.mode == minimized` so the host
+  /// only rebuilds when that single bit flips. Without this, every controller
+  /// notification (token fetch, connect, join, etc.) would trigger a setState
+  /// whose build output didn't actually change.
+  bool _isMinimized = false;
+
   @override
   void initState() {
     super.initState();
     if (OitVideoCall.isInitialized) {
       _controller = OitVideoCall.controllerOrThrow
         ..addListener(_onChange);
+      _isMinimized = _controller?.state.mode == ActiveCallMode.minimized;
     }
   }
 
@@ -69,50 +77,36 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
   }
 
   void _onChange() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    final next = _controller?.state.mode == ActiveCallMode.minimized;
+    if (next != _isMinimized) {
+      setState(() => _isMinimized = next);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final c = _controller;
-    final showMini =
-        c != null && c.state.mode == ActiveCallMode.minimized;
     return Stack(
       children: [
         widget.child,
-        if (showMini)
-          // Builder defaults to DefaultMinimizedCallView (Task 4).
+        if (_isMinimized && c != null)
           widget.minimizedBuilder?.call(context, c) ??
-              _PlaceholderMini(controller: c),
+              MinimizedCallView(
+                controller: c,
+                onExpand: () => _onExpandRequested(c),
+                // Refined in Task 7 — for now this just ends the call without
+                // a confirm prompt.
+                onEnd: () async => c.endCall(),
+              ),
       ],
     );
   }
-}
 
-class _PlaceholderMini extends StatelessWidget {
-  const _PlaceholderMini({required this.controller});
-  final ActiveCallController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    // Replaced in Task 4. Kept here so Task 3 can be merged independently.
-    return Positioned(
-      right: 16,
-      bottom: 16,
-      child: Material(
-        color: Colors.black87,
-        borderRadius: BorderRadius.circular(12),
-        child: const SizedBox(
-          width: 120,
-          height: 160,
-          child: Center(
-            child: Text(
-              'Call',
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-        ),
-      ),
-    );
+  void _onExpandRequested(ActiveCallController c) {
+    // Refined in Task 6 (route-pushing). For now we just flip the controller
+    // out of minimized mode and notify the optional app-level callback.
+    c.expand();
+    widget.onExpandRequested?.call();
   }
 }
