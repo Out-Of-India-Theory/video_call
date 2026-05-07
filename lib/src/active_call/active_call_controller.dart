@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
 
@@ -47,6 +49,19 @@ class ActiveCallController extends ChangeNotifier {
   /// call, and returns [ConnectErrored] instead of silently committing a
   /// connected state to a controller the caller has already torn down.
   int _connectEpoch = 0;
+
+  /// Subscription to the live [Call]'s `state` emitter. Created after a
+  /// successful join in [connectAndJoin]; cancelled by [endCall] before the
+  /// SDK teardown and by the cancellation branches inside [connectAndJoin].
+  /// Non-null only while the controller has a live `Call`.
+  ///
+  /// Drives two transitions:
+  ///   * `disconnected` (server ended, network drop, duration timeout) →
+  ///     [endCall] runs, taking the controller back to `idle` and dismissing
+  ///     a minimized PiP if one is on screen.
+  ///   * `fastReconnecting` ↔ `connected` flips the mode bit so the
+  ///     back-press matrix in [CallScreen] can react.
+  StreamSubscription<CallState>? _callStateSub;
 
   /// Phases 2–5 of the v1 `_start()`: token → connect → getCall → join.
   /// On success, mode flips to `connected` and `state.call` is non-null.
@@ -192,7 +207,52 @@ class ActiveCallController extends ChangeNotifier {
 
     _state = _state.copyWith(mode: ActiveCallMode.connected, call: call);
     notifyListeners();
+
+    // Subscribe to SDK call state so a natural disconnect (server ended,
+    // network drop, duration timeout) tears the controller down even when
+    // we're minimized — the full-screen [CallScreen] only handles disconnect
+    // when its `_Ready` branch is mounted. We `unawaited` any stale
+    // subscription's cancel (defense-in-depth; the cleanup branches null
+    // it out already) because awaiting `StreamSubscription.cancel` deadlocks
+    // a `flutter_test` `FakeAsync` zone — see [endCall] for details.
+    final stale = _callStateSub;
+    _callStateSub = null;
+    if (stale != null) unawaited(stale.cancel());
+    _callStateSub = call.state.listen(_onSdkCallStateChanged);
+
     return ConnectReady(call);
+  }
+
+  /// Reacts to the SDK's `Call.state` updates.
+  ///
+  /// * `disconnected` → [endCall] (idempotent across the existing
+  ///   [_leaveInProgress]-style guards in callers).
+  /// * `fastReconnecting` while we're `connected` → flip to
+  ///   `fastReconnecting` (the back-press matrix in [CallScreen]
+  ///   distinguishes the two modes).
+  /// * `connected` while we're `fastReconnecting` → flip back.
+  ///
+  /// Other transitions (joining, joined, idle) are ignored — the controller
+  /// already commits its own `connected` mode at the end of [connectAndJoin]
+  /// and we don't want to fight the SDK's intermediate joining states.
+  void _onSdkCallStateChanged(CallState cs) {
+    final status = cs.status;
+    if (status.isDisconnected) {
+      unawaited(endCall());
+      return;
+    }
+    if (status.isFastReconnecting &&
+        _state.mode == ActiveCallMode.connected) {
+      _state = _state.copyWith(mode: ActiveCallMode.fastReconnecting);
+      notifyListeners();
+      return;
+    }
+    if (status.isConnected &&
+        _state.mode == ActiveCallMode.fastReconnecting) {
+      _state = _state.copyWith(mode: ActiveCallMode.connected);
+      notifyListeners();
+      return;
+    }
   }
 
   /// Kept for callers that want to flip into `connecting` without performing
@@ -265,6 +325,16 @@ class ActiveCallController extends ChangeNotifier {
     // Cancel any in-flight [connectAndJoin] so a late commit can't flip us
     // back to `connected` after we've already torn down.
     _connectEpoch++;
+    // Stop reacting to SDK call-state updates before we tear down — without
+    // this, the SDK's transition to `disconnected` during `leaveCall` would
+    // re-enter `endCall` recursively. We `unawaited` the cancel because in
+    // a `flutter_test` `FakeAsync` zone, `await sub.cancel()` poisons the
+    // microtask queue and any subsequent await deadlocks the test. The
+    // listener stops firing synchronously the moment cancel is invoked, so
+    // we don't need to wait for the returned Future to settle.
+    final sub = _callStateSub;
+    _callStateSub = null;
+    if (sub != null) unawaited(sub.cancel());
     final call = _state.call;
     _state = _state.copyWith(mode: ActiveCallMode.ending);
     notifyListeners();
@@ -287,6 +357,12 @@ class ActiveCallController extends ChangeNotifier {
   void reset() {
     // Same cancellation semantics as [endCall] for any in-flight attempt.
     _connectEpoch++;
+    // Best-effort fire-and-forget cancel — `reset()` is synchronous so we
+    // can't await. In practice this is only used in tests / host-app
+    // sign-out where no live call exists, but defending against the
+    // late-disconnect re-entry is cheap.
+    unawaited(_callStateSub?.cancel());
+    _callStateSub = null;
     _state = ActiveCallState.idle;
     notifyListeners();
   }

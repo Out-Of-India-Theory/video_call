@@ -5,6 +5,7 @@ import 'package:oit_video_call/src/active_call/active_call_controller.dart';
 import 'package:oit_video_call/src/active_call/active_call_state.dart';
 import 'package:oit_video_call/src/config.dart';
 import 'package:oit_video_call/src/models/video_user.dart';
+import 'package:stream_video_flutter/stream_video_flutter.dart';
 
 import '../screen/fake_call_session.dart';
 
@@ -275,6 +276,107 @@ void main() {
         // on top of endCall's dispose — best-effort double-dispose is
         // documented as safe.
         expect(session.disposeCount, greaterThanOrEqualTo(1));
+      },
+    );
+  });
+
+  group('ActiveCallController SDK state subscription', () {
+    late FakeCallSession session;
+    late ActiveCallController controller;
+    late OitVideoCallConfig config;
+
+    setUp(() {
+      session = FakeCallSession();
+      controller = ActiveCallController(session: session);
+      config = OitVideoCallConfig(
+        apiKey: 'k',
+        user: const VideoUser(id: 'u', name: 'U'),
+        tokenProvider: () async => 't',
+      );
+    });
+
+    test(
+      'SDK status disconnected after join → endCall → idle',
+      () async {
+        // Drive the controller through a successful join so the post-join
+        // subscription on `call.state` is wired up.
+        final result = await controller.connectAndJoin(
+          config: config,
+          callId: 'c1',
+          callType: 'default',
+          audioOnly: false,
+          createIfMissing: false,
+        );
+        expect(result, isA<ConnectReady>());
+        expect(controller.state.mode, ActiveCallMode.connected);
+
+        // Simulate the SDK firing a disconnect (server ended, network drop,
+        // duration timeout). The fake's `pushCallStatus` flips the underlying
+        // state emitter so the controller's listener fires synchronously.
+        session.pushCallStatus(
+          CallStatus.disconnected(DisconnectReason.ended()),
+        );
+        // `endCall` is dispatched via `unawaited` from the listener; let the
+        // microtask + the awaited `_session.dispose()` settle.
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        expect(controller.state.mode, ActiveCallMode.idle);
+        expect(controller.state.call, isNull);
+        expect(session.leaveCount, 1);
+        expect(session.disposeCount, 1);
+      },
+    );
+
+    test(
+      'SDK fastReconnecting flips connected → fastReconnecting and back',
+      () async {
+        await controller.connectAndJoin(
+          config: config,
+          callId: 'c1',
+          callType: 'default',
+          audioOnly: false,
+          createIfMissing: false,
+        );
+        expect(controller.state.mode, ActiveCallMode.connected);
+
+        session.pushCallStatus(
+          CallStatus.reconnecting(0, isFastReconnectAttempt: true),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(controller.state.mode, ActiveCallMode.fastReconnecting);
+
+        session.pushCallStatus(CallStatus.connected());
+        await Future<void>.delayed(Duration.zero);
+        expect(controller.state.mode, ActiveCallMode.connected);
+      },
+    );
+
+    test(
+      'SDK disconnect after minimize: tears down → idle (auto-dismisses PiP)',
+      () async {
+        await controller.connectAndJoin(
+          config: config,
+          callId: 'c1',
+          callType: 'default',
+          audioOnly: false,
+          createIfMissing: false,
+        );
+        // Move into the minimized state, simulating user back-press → PiP.
+        expect(controller.minimize(), isTrue);
+        expect(controller.state.mode, ActiveCallMode.minimized);
+
+        // Server ends the call while we're minimized — the SDK pushes
+        // `disconnected`, the controller's listener triggers endCall, the
+        // host overlay vanishes (mode goes idle).
+        session.pushCallStatus(
+          CallStatus.disconnected(DisconnectReason.ended()),
+        );
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+
+        expect(controller.state.mode, ActiveCallMode.idle);
+        expect(controller.state.call, isNull);
       },
     );
   });
