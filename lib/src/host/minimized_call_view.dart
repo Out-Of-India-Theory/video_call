@@ -3,19 +3,45 @@ import 'package:stream_video_flutter/stream_video_flutter.dart';
 
 import '../active_call/active_call_controller.dart';
 
+/// Picks which participant the minimized PiP tile should render.
+///
+/// Precedence:
+///   1. **Remote dominant speaker** — when a non-local participant is the
+///      SFU's currently-highlighted speaker, follow the conversation.
+///   2. **First remote** — for 1:1 consultations, keep the *other* person
+///      fixed in the mini regardless of who is currently talking. (We
+///      deliberately don't promote the local speaker over the remote
+///      because flipping the consultation tile to self-view mid-conversation
+///      is a worse default than a stable peer view.)
+///   3. **First of any kind** — solo / pre-join sessions only have the local
+///      user. Without this fallback, minimizing during a solo test would
+///      leave the user staring at a "Connecting…" placeholder despite being
+///      on a live call.
+///
+/// Returns `null` when the participant list is empty.
+@visibleForTesting
+CallParticipantState? pickMinimizedParticipant(
+  Iterable<CallParticipantState> participants,
+) {
+  return participants
+          .where((p) => p.isDominantSpeaker && !p.isLocal)
+          .firstOrNull ??
+      participants.where((p) => !p.isLocal).firstOrNull ??
+      participants.firstOrNull;
+}
+
 /// Floating mini-window content rendered inside Stream's [FloatingViewContainer]
 /// by [OitVideoCallHost] when the active call is minimized.
 ///
 /// Drag + corner-snap is provided by the surrounding [FloatingViewContainer];
 /// this widget renders only the inner card content (120x160dp dark Material
-/// card with rounded corners). Renders only the **first remote** participant
-/// (`participants.where((p) => !p.isLocal).firstOrNull`); the local participant
-/// is intentionally never shown here. While no remote participant is present
-/// (call still null, joining, or remote hasn't arrived yet) we show a small
-/// "Connecting..." placeholder.
+/// card with rounded corners). The participant rendered in the tile is chosen
+/// by [pickMinimizedParticipant] — see its dartdoc for the precedence rules.
 ///
-/// Bottom strip exposes three controls: mic toggle, end-call (red), and
-/// expand. Tapping the video area also expands.
+/// "Connecting…" only shows if the participant list is empty (call object
+/// not yet built, or every participant left). Bottom strip exposes three
+/// controls: mic toggle, end-call (red), and expand. Tapping the video area
+/// also expands.
 class MinimizedCallView extends StatelessWidget {
   const MinimizedCallView({
     super.key,
@@ -75,17 +101,16 @@ class MinimizedCallView extends StatelessWidget {
 
     return PartialCallStateBuilder<CallParticipantState?>(
       call: call,
-      selector: (s) =>
-          s.callParticipants.where((p) => !p.isLocal).firstOrNull,
-      builder: (_, remote) {
-        if (remote == null) return const _Placeholder();
+      selector: (s) => pickMinimizedParticipant(s.callParticipants),
+      builder: (_, participant) {
+        if (participant == null) return const _Placeholder();
         // Key by uniqueParticipantKey so renderer subscriptions are recreated
-        // cleanly when the remote participant changes (matches Stream's own
-        // widget conventions).
+        // cleanly when the rendered participant changes (e.g. dominant
+        // speaker switches). Matches Stream's own widget conventions.
         return StreamCallParticipant(
-          key: ValueKey(remote.uniqueParticipantKey),
+          key: ValueKey(participant.uniqueParticipantKey),
           call: call,
-          participant: remote,
+          participant: participant,
           showParticipantLabel: false,
           showSpeakerBorder: false,
         );

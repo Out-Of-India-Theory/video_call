@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.3
+
+- **change**: `MinimizedCallView` now picks the participant to render via a
+  three-step fallback: **remote-dominant-speaker → first-remote →
+  first-of-any**. Local-dominant is intentionally ignored so 1:1 consultation
+  tiles don't flip to self-view when the local user is talking. Solo /
+  pre-join sessions still see their own tile (covered by the final
+  fallback). Selector logic is extracted as a `@visibleForTesting`
+  `pickMinimizedParticipant` and unit-tested across solo, 1:1 (peer-silent,
+  local-dominant, remote-dominant), and multi-party scenarios.
+
 ## 1.2.2
 
 - **fix**: `ActiveCallController.connectAndJoin` Phase 5 catch now best-effort
