@@ -8,14 +8,22 @@ import '../active_call/active_call_controller.dart';
 ///
 /// Drag + corner-snap is provided by the surrounding [FloatingViewContainer];
 /// this widget renders only the inner card content (120x160dp dark Material
-/// card with rounded corners). Renders only the **first remote** participant
-/// (`participants.where((p) => !p.isLocal).firstOrNull`); the local participant
-/// is intentionally never shown here. While no remote participant is present
-/// (call still null, joining, or remote hasn't arrived yet) we show a small
-/// "Connecting..." placeholder.
+/// card with rounded corners). Picks one participant to render in the tile,
+/// preferring (in order):
 ///
-/// Bottom strip exposes three controls: mic toggle, end-call (red), and
-/// expand. Tapping the video area also expands.
+///   1. The dominant speaker — whoever the SFU currently highlights, so the
+///      mini follows the conversation.
+///   2. The first remote participant — keeps the consultation peer visible
+///      when no one's actively talking.
+///   3. The first participant of any kind — covers solo / pre-join states
+///      where only the local user is in the call. Without this, the user
+///      would minimize and see a "Connecting…" placeholder despite being on
+///      a live call.
+///
+/// "Connecting…" only shows if the participant list is empty (call object
+/// not yet built, or every participant left). Bottom strip exposes three
+/// controls: mic toggle, end-call (red), and expand. Tapping the video area
+/// also expands.
 class MinimizedCallView extends StatelessWidget {
   const MinimizedCallView({
     super.key,
@@ -75,17 +83,24 @@ class MinimizedCallView extends StatelessWidget {
 
     return PartialCallStateBuilder<CallParticipantState?>(
       call: call,
-      selector: (s) =>
-          s.callParticipants.where((p) => !p.isLocal).firstOrNull,
-      builder: (_, remote) {
-        if (remote == null) return const _Placeholder();
+      selector: (s) {
+        final ps = s.callParticipants;
+        // Dominant speaker → first remote → first of any kind. The fallback
+        // chain ensures solo-test sessions still see the local tile instead
+        // of an indefinite "Connecting…" placeholder.
+        return ps.where((p) => p.isDominantSpeaker).firstOrNull ??
+            ps.where((p) => !p.isLocal).firstOrNull ??
+            ps.firstOrNull;
+      },
+      builder: (_, participant) {
+        if (participant == null) return const _Placeholder();
         // Key by uniqueParticipantKey so renderer subscriptions are recreated
-        // cleanly when the remote participant changes (matches Stream's own
-        // widget conventions).
+        // cleanly when the rendered participant changes (e.g. dominant
+        // speaker switches). Matches Stream's own widget conventions.
         return StreamCallParticipant(
-          key: ValueKey(remote.uniqueParticipantKey),
+          key: ValueKey(participant.uniqueParticipantKey),
           call: call,
-          participant: remote,
+          participant: participant,
           showParticipantLabel: false,
           showSpeakerBorder: false,
         );

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.3
+
+- **change**: `MinimizedCallView` now picks the participant to render via
+  dominant-speaker → first-remote → first-of-any fallback. Previously it only
+  rendered the first remote, which made solo / pre-join sessions stuck on
+  the "Connecting…" placeholder. The mini now follows the conversation
+  (switches as the SFU's dominant speaker changes) and shows the local user
+  during solo testing.
+
 ## 1.2.2
 
 - **fix**: `ActiveCallController.connectAndJoin` Phase 5 catch now best-effort
