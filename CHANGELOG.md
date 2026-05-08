@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.2.8
+
+- **change**: Mini PiP now starts in the **bottom-right** corner instead of
+  top-right. Better match for the consumer / mitra UX expectation, and
+  keeps the floating window clear of the AppBar. The floating window is
+  still draggable and snaps to the nearest corner on release; this only
+  changes the initial corner.
+- **fix**: `floatingViewPadding` is now computed from `MediaQuery.viewPadding`
+  (`max(16, largestInset + 8)`) instead of a hard-coded 16dp. Stream's
+  `FloatingViewContainer` uses a single padding value for all corners and
+  doesn't account for safe-area insets, so the previous 16dp default
+  caused the bottom-right corner to overlap with the gesture-navigation
+  indicator on Pixel / iPhone devices. The dynamic value clears the
+  system gesture / status-bar areas at every corner without affecting
+  3-button-nav devices (where `viewPadding.bottom == 0`, falling back to
+  the 16dp minimum).
+
 ## 1.2.7
 
 - **fix**: Pre-flip from v1.2.6 is now symmetric — applied in both the
