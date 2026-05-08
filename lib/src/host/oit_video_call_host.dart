@@ -161,7 +161,14 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
     // than crash.
     final args = OitVideoCall.lastArgsOrNull;
     if (args == null) return;
-    Navigator.of(context, rootNavigator: true).push<void>(
+    // The host's [BuildContext] sits ABOVE the app's Navigator (apps wire
+    // the host through `MaterialApp.builder`, which puts us a level above
+    // the router), so `Navigator.of(context, rootNavigator: true)` walks up
+    // and finds nothing — push silently no-ops. Walk DOWN from the root
+    // element to find the topmost Navigator and push directly onto it.
+    final navigator = _findTopmostNavigator();
+    if (navigator == null) return;
+    navigator.push<void>(
       MaterialPageRoute<void>(
         builder: (_) => OitVideoCall.callScreen(
           callId: args.callId,
@@ -197,9 +204,43 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
     if (c.state.mode != ActiveCallMode.minimized) return;
     final confirm = OitVideoCall.lastArgsOrNull?.confirmLeave;
     if (confirm != null) {
-      final ok = await confirm(context);
+      // `confirm` (e.g. `showModalBottomSheet`) needs a context that has the
+      // app's Navigator above it. The host's own context sits above the
+      // Navigator, so we hand off the navigator-overlay's context — that's
+      // a descendant of the Navigator and resolves correctly.
+      final navigator = _findTopmostNavigator();
+      final overlayContext = navigator?.overlay?.context;
+      if (overlayContext == null) {
+        // No Navigator yet (rare — would require minimizing before any route
+        // is mounted). Fall through to ending without confirmation rather
+        // than swallowing the tap silently.
+        await c.endCall();
+        return;
+      }
+      final ok = await confirm(overlayContext);
       if (!ok || !mounted) return;
     }
     await c.endCall();
+  }
+
+  /// Walks down from [WidgetsBinding.rootElement] and returns the first
+  /// [NavigatorState] found in the element tree. We can't use
+  /// `Navigator.of(host.context, rootNavigator: true)` because the host
+  /// widget is wired through `MaterialApp.builder` and sits *above* the
+  /// app's Navigator — `Navigator.of` walks ancestors only.
+  NavigatorState? _findTopmostNavigator() {
+    final root = WidgetsBinding.instance.rootElement;
+    if (root == null) return null;
+    NavigatorState? found;
+    void visit(Element element) {
+      if (found != null) return;
+      if (element is StatefulElement && element.state is NavigatorState) {
+        found = element.state as NavigatorState;
+        return;
+      }
+      element.visitChildren(visit);
+    }
+    root.visitChildren(visit);
+    return found;
   }
 }

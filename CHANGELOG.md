@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.4
+
+- **fix**: Mini view's End and Fullscreen buttons now work in apps that wire
+  `OitVideoCallHost` through `MaterialApp.builder` (which is the documented
+  pattern). The host's `BuildContext` sits *above* the app's Navigator there,
+  so `Navigator.of(context, rootNavigator: true)` walked up and found
+  nothing — pushes and `showModalBottomSheet` (used by `confirmLeave`)
+  silently no-op'd. Host now walks DOWN from `WidgetsBinding.rootElement` to
+  find the topmost `NavigatorState` and uses its overlay context for the
+  confirm prompt and its own `push` for tap-to-expand. Mic was unaffected
+  because it talks straight to `Call.setMicrophoneEnabled`.
+
 ## 1.2.3
 
 - **change**: `MinimizedCallView` now picks the participant to render via a
