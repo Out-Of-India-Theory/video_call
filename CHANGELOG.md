@@ -2,12 +2,14 @@
 
 ## 1.2.3
 
-- **change**: `MinimizedCallView` now picks the participant to render via
-  dominant-speaker → first-remote → first-of-any fallback. Previously it only
-  rendered the first remote, which made solo / pre-join sessions stuck on
-  the "Connecting…" placeholder. The mini now follows the conversation
-  (switches as the SFU's dominant speaker changes) and shows the local user
-  during solo testing.
+- **change**: `MinimizedCallView` now picks the participant to render via a
+  three-step fallback: **remote-dominant-speaker → first-remote →
+  first-of-any**. Local-dominant is intentionally ignored so 1:1 consultation
+  tiles don't flip to self-view when the local user is talking. Solo /
+  pre-join sessions still see their own tile (covered by the final
+  fallback). Selector logic is extracted as a `@visibleForTesting`
+  `pickMinimizedParticipant` and unit-tested across solo, 1:1 (peer-silent,
+  local-dominant, remote-dominant), and multi-party scenarios.
 
 ## 1.2.2
 
