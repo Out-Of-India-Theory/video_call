@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.9
+
+- **revert**: Drop the dynamic `floatingViewPadding` heuristic added in
+  v1.2.8. Apps wiring the host through `MaterialApp.builder` already see
+  a safe-area-aware container (the Scaffold's `SafeArea` and Material
+  chrome consume system insets before the FloatingViewContainer measures),
+  so adding `viewPadding.bottom + 8` on top noticeably shifted the mini
+  toward the screen center. Padding now defaults to Stream's 16dp.
+
 ## 1.2.8
 
 - **change**: Mini PiP now starts in the **bottom-right** corner instead of
