@@ -151,4 +151,136 @@ void main() {
       expect(session.disposeCount, 1);
     },
   );
+
+  // -------------------------------------------------------------------
+  // Regression tests for the host's Navigator-resolution path. The bug
+  // surface is the documented integration pattern: `OitVideoCallHost`
+  // wired through `MaterialApp.builder`. Earlier tests use `home:` which
+  // puts the host BELOW the Navigator (Navigator.of(host.context) walks
+  // up and finds it) — exactly the path that worked before the v1.2.4
+  // fix. The tests below put the host ABOVE the Navigator (via builder),
+  // matching how production apps wire it.
+  // -------------------------------------------------------------------
+
+  testWidgets(
+    'builder-wired host: tap End passes a Navigator-rooted context to confirmLeave',
+    (tester) async {
+      BuildContext? receivedContext;
+      final session = FakeCallSession();
+      _setupSingletonInMinimized(
+        session: session,
+        confirmLeave: (ctx) async {
+          receivedContext = ctx;
+          return false; // skip the endCall path so the test stays focused
+        },
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (_, child) => OitVideoCallHost(child: child!),
+          home: const Scaffold(body: SizedBox.expand()),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.byIcon(Icons.call_end), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.call_end));
+      await tester.pump();
+      await tester.pump();
+
+      expect(receivedContext, isNotNull,
+          reason: 'confirmLeave should have been invoked');
+      // The actual regression check: the context handed to confirmLeave must
+      // resolve a Navigator ancestor, so `showModalBottomSheet(context: ...)`
+      // (used by the consumer / mitra `confirmLeave` implementations) works.
+      expect(
+        Navigator.maybeOf(receivedContext!),
+        isNotNull,
+        reason: 'context passed to confirmLeave must have a Navigator '
+            'ancestor — pre-fix this returned null and showModalBottomSheet '
+            'silently failed',
+      );
+    },
+  );
+
+  testWidgets(
+    'builder-wired host: navigatorKey is preferred over tree-walk fallback',
+    (tester) async {
+      BuildContext? receivedContext;
+      final session = FakeCallSession();
+      _setupSingletonInMinimized(
+        session: session,
+        confirmLeave: (ctx) async {
+          receivedContext = ctx;
+          return false;
+        },
+      );
+
+      final navKey = GlobalKey<NavigatorState>();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorKey: navKey,
+          builder: (_, child) => OitVideoCallHost(
+            navigatorKey: navKey,
+            child: child!,
+          ),
+          home: const Scaffold(body: SizedBox.expand()),
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.byIcon(Icons.call_end));
+      await tester.pump();
+      await tester.pump();
+
+      expect(receivedContext, isNotNull);
+      expect(
+        Navigator.of(receivedContext!),
+        same(navKey.currentState),
+        reason: 'when navigatorKey is supplied, the host must scope the '
+            'confirm prompt to that navigator instead of walking the element '
+            'tree',
+      );
+    },
+  );
+
+  testWidgets(
+    'no Navigator reachable: End aborts without ending or invoking confirmLeave',
+    (tester) async {
+      var confirmCalled = false;
+      final session = FakeCallSession();
+      final controller = _setupSingletonInMinimized(
+        session: session,
+        confirmLeave: (_) async {
+          confirmCalled = true;
+          return true;
+        },
+      );
+
+      // No MaterialApp → no Navigator anywhere in the tree. Exercises the
+      // abort branch in `_onEndRequested` where `_resolveNavigator()` returns
+      // null. The host must NOT silently end the call (worse default than a
+      // no-op) and NOT invoke confirmLeave (it would crash on
+      // `showModalBottomSheet` without a Navigator).
+      await tester.pumpWidget(
+        const Directionality(
+          textDirection: TextDirection.ltr,
+          child: OitVideoCallHost(child: SizedBox.expand()),
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.byIcon(Icons.call_end));
+      await tester.pump();
+      await tester.pump();
+
+      expect(confirmCalled, isFalse,
+          reason: 'confirmLeave must not be invoked without a Navigator');
+      expect(controller.state.mode, ActiveCallMode.minimized,
+          reason: 'call must stay alive — silently ending without '
+              'confirmation is worse than the user re-tapping later');
+      expect(session.disposeCount, 0);
+    },
+  );
 }

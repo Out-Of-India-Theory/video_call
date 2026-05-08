@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.2.5
+
+- **feat**: `OitVideoCallHost` accepts an optional `navigatorKey` parameter.
+  Pass the same key you hand to `MaterialApp.navigatorKey` /
+  `MaterialApp.router`'s router-delegate to skip the down-tree walk used by
+  the v1.2.4 fix. Strongly recommended in production apps — the down-tree
+  walk is best-effort and can pick the wrong navigator in
+  multi-`MaterialApp` / add-to-app embeddings.
+- **fix**: When no Navigator can be reached, the mini End button now aborts
+  silently instead of falling through to `endCall()`. Silently terminating a
+  live consultation because of a transient lookup miss is a worse default
+  than a no-op (the user can re-tap once the navigator is mounted).
+- **test**: Added three regression tests that wire `OitVideoCallHost`
+  through `MaterialApp.builder` (the actual bug surface): builder-wired
+  `confirmLeave` receives a Navigator-rooted context; `navigatorKey` takes
+  precedence over the tree walk; abort path leaves the call alive.
+
 ## 1.2.4
 
 - **fix**: Mini view's End and Fullscreen buttons now work in apps that wire
