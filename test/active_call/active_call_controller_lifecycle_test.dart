@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:oit_video_call/src/active_call/active_call_controller.dart';
 import 'package:oit_video_call/src/active_call/active_call_state.dart';
 import 'package:oit_video_call/src/config.dart';
+import 'package:oit_video_call/src/errors.dart';
 import 'package:oit_video_call/src/models/video_user.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
 
@@ -147,25 +148,35 @@ void main() {
       expect(session.joinCount, 1);
     });
 
-    test('re-entering with a different callId throws StateError', () async {
-      await controller.connectAndJoin(
-        config: config,
-        callId: 'c1',
-        callType: 'default',
-        audioOnly: false,
-        createIfMissing: false,
-      );
-      expect(
-        () => controller.connectAndJoin(
+    test(
+      're-entering with a different callId returns ConnectErrored(unknown)',
+      () async {
+        // Was previously `throwsStateError`. Returning ConnectErrored keeps
+        // `_start()`'s fire-and-forget contract intact: a synchronous throw
+        // from a `Future<ConnectResult>`-returning function would surface as
+        // an unhandled future error and leave the screen stuck on its
+        // loading spinner forever.
+        await controller.connectAndJoin(
+          config: config,
+          callId: 'c1',
+          callType: 'default',
+          audioOnly: false,
+          createIfMissing: false,
+        );
+        final result = await controller.connectAndJoin(
           config: config,
           callId: 'c2',
           callType: 'default',
           audioOnly: false,
           createIfMissing: false,
-        ),
-        throwsStateError,
-      );
-    });
+        );
+        expect(result, isA<ConnectErrored>());
+        final errored = result as ConnectErrored;
+        expect(errored.code, OitVideoCallErrorCode.unknown);
+        expect(errored.message, contains('c1'));
+        expect(errored.message, contains('c2'));
+      },
+    );
 
     test('after error, reset() then connectAndJoin succeeds (retry path)', () async {
       // Drive the controller into ConnectErrored via a failing tokenProvider.
@@ -214,6 +225,24 @@ void main() {
       expect(controller.state.call, isNull);
       // We saw `ending` along the way and ended at `idle`.
       expect(modes, [ActiveCallMode.ending, ActiveCallMode.idle]);
+      expect(session.leaveCount, 1);
+      expect(session.disposeCount, 1);
+    });
+
+    test('concurrent endCall invocations only run leave/dispose once', () async {
+      // Two simultaneous endCall calls (e.g. user taps End in mini AND a host
+      // lifecycle observer triggers an end) must not race through leaveCall +
+      // dispose twice. The `ending` guard short-circuits the second
+      // invocation while the first is still awaiting teardown.
+      await controller.connectAndJoin(
+        config: config,
+        callId: 'c1',
+        callType: 'default',
+        audioOnly: false,
+        createIfMissing: false,
+      );
+      await Future.wait([controller.endCall(), controller.endCall()]);
+      expect(controller.state.mode, ActiveCallMode.idle);
       expect(session.leaveCount, 1);
       expect(session.disposeCount, 1);
     });

@@ -24,24 +24,17 @@ class MinimizedCallView extends StatelessWidget {
     required this.onEnd,
   });
 
-  /// Visible only for the placeholder unit test. Renders the
-  /// "Connecting..." branch without needing a live [ActiveCallController].
-  @visibleForTesting
-  const MinimizedCallView.placeholderForTest({super.key})
-      : controller = null,
-        onExpand = null,
-        onEnd = null;
-
-  /// Controller backing the call. Nullable so the
-  /// [MinimizedCallView.placeholderForTest] constructor can be `const`.
-  /// Real production usage always passes a non-null controller.
-  final ActiveCallController? controller;
+  /// Controller backing the call. Always non-null in production; the
+  /// "Connecting…" placeholder branch is reached when `controller.state.call`
+  /// is still null (e.g. the controller is in the `connecting` mode or just
+  /// flipped into `minimized` before the SDK has a live `Call`).
+  final ActiveCallController controller;
 
   /// Invoked when the user taps the video area or the expand icon.
-  final VoidCallback? onExpand;
+  final VoidCallback onExpand;
 
   /// Invoked when the user taps the red end-call icon.
-  final VoidCallback? onEnd;
+  final VoidCallback onEnd;
 
   /// Width passed to Stream's [FloatingViewContainer] by the host.
   static const double width = 120;
@@ -51,7 +44,7 @@ class MinimizedCallView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final call = controller?.state.call;
+    final call = controller.state.call;
     return Material(
       elevation: 8,
       color: Colors.black,
@@ -77,9 +70,7 @@ class MinimizedCallView extends StatelessWidget {
   }
 
   Widget _buildVideo() {
-    final c = controller;
-    if (c == null) return const _Placeholder();
-    final call = c.state.call;
+    final call = controller.state.call;
     if (call == null) return const _Placeholder();
 
     return PartialCallStateBuilder<CallParticipantState?>(
@@ -110,7 +101,14 @@ class MinimizedCallView extends StatelessWidget {
             builder: (_, isOn) => IconButton(
               iconSize: 18,
               visualDensity: VisualDensity.compact,
-              onPressed: () => _toggleMic(call),
+              // Pass `isOn` from the builder closure (the latest visual state
+              // at the time of tap) instead of reading `call.state.value`
+              // synchronously inside `_toggleMic`. Two rapid taps on a
+              // stale-icon view will then both act on the same value (intent:
+              // mute) and the SDK serializes them — instead of cancelling
+              // each other when the second tap re-reads a stale-or-fresh
+              // local state that depends on SDK update timing.
+              onPressed: () => _toggleMic(call, isOn),
               icon: Icon(
                 isOn ? Icons.mic : Icons.mic_off,
                 color: isOn ? Colors.white : Colors.redAccent,
@@ -148,8 +146,7 @@ class MinimizedCallView extends StatelessWidget {
     );
   }
 
-  Future<void> _toggleMic(Call call) async {
-    final isOn = call.state.value.localParticipant?.isAudioEnabled ?? false;
+  Future<void> _toggleMic(Call call, bool isOn) async {
     await call.setMicrophoneEnabled(enabled: !isOn);
   }
 }

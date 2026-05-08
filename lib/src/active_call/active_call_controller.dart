@@ -66,10 +66,10 @@ class ActiveCallController extends ChangeNotifier {
   /// Phases 2–5 of the v1 `_start()`: token → connect → getCall → join.
   /// On success, mode flips to `connected` and `state.call` is non-null.
   ///
-  /// Throws [StateError] if invoked with a different `callId` while another
-  /// call is already in progress; if the same `callId` is re-entered after a
-  /// successful connect, the existing live [Call] is returned via
-  /// [ConnectReady] and no new I/O is performed.
+  /// Returns [ConnectErrored] with [OitVideoCallErrorCode.unknown] if invoked
+  /// with a different `callId` while another call is already in progress; if
+  /// the same `callId` is re-entered after a successful connect, the existing
+  /// live [Call] is returned via [ConnectReady] and no new I/O is performed.
   ///
   /// To retry after a [ConnectErrored] result, callers must invoke [reset]
   /// first (the controller refuses to re-connect when the state isn't
@@ -91,8 +91,12 @@ class ActiveCallController extends ChangeNotifier {
       notifyListeners();
     } else if (_state.callId != callId) {
       // Re-entering with a different call id while another is active is a
-      // bug at the host-app level; bail loudly.
-      throw StateError(
+      // host-app bug; surface it via ConnectErrored so the screen renders
+      // the error UI instead of leaving an unhandled StateError to silently
+      // hang the spinner. `_start()` is fire-and-forget from `initState`,
+      // so a thrown error would surface as an unhandled future error.
+      return ConnectErrored(
+        OitVideoCallErrorCode.unknown,
         'Active call already in progress for ${_state.callId}; '
         'cannot start $callId.',
       );
@@ -185,6 +189,21 @@ class ActiveCallController extends ChangeNotifier {
         await _session.setCameraEnabled(call, false);
       }
     } catch (_) {
+      // If `joinCall` succeeded but `setCameraEnabled` failed, the call is
+      // fully joined and would otherwise be leaked (no `leaveCall`, no
+      // `dispose`). Mirror the cancellation branches above with best-effort
+      // cleanup so a partial-success failure path doesn't strand SDK
+      // resources.
+      try {
+        await _session.leaveCall(call);
+      } catch (_) {
+        // best-effort
+      }
+      try {
+        await _session.dispose();
+      } catch (_) {
+        // best-effort
+      }
       return ConnectErrored(
         OitVideoCallErrorCode.joinFailed,
         'Could not join call.',
@@ -322,11 +341,18 @@ class ActiveCallController extends ChangeNotifier {
 
   /// Permanent end. Tears down the SDK call, resets state, notifies.
   Future<void> endCall() async {
-    // Idempotent: a no-op when already idle. Prevents spurious
-    // `ending → idle` notification cycles on duplicate calls (e.g. host
-    // app's lifecycle observer + the SDK disconnect listener firing in
-    // close succession).
-    if (_state.mode == ActiveCallMode.idle) return;
+    // Idempotent: a no-op when already idle, and a no-op when a previous
+    // invocation is still in flight (`ending`). The first guard prevents
+    // spurious `ending → idle` notification cycles on duplicate calls (e.g.
+    // host app's lifecycle observer + the SDK disconnect listener firing in
+    // close succession). The `ending` guard prevents a second invocation
+    // (e.g. user taps End in the mini AND a host-app lifecycle observer
+    // triggers an end) from running `leaveCall` + `dispose` concurrently
+    // with a still-awaiting first invocation.
+    if (_state.mode == ActiveCallMode.idle ||
+        _state.mode == ActiveCallMode.ending) {
+      return;
+    }
     // Cancel any in-flight [connectAndJoin] so a late commit can't flip us
     // back to `connected` after we've already torn down.
     _connectEpoch++;
