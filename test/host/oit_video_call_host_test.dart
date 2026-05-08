@@ -201,6 +201,46 @@ void main() {
   );
 
   testWidgets(
+    'builder-wired host: tap Fullscreen with onExpandRequested also flips synchronously',
+    (tester) async {
+      // Symmetric check for the v1.2.7 fix. Earlier versions only pre-flipped
+      // on the plugin-handled branch; apps wiring `onExpandRequested` (the
+      // recommended path for go_router / auto_route) hit the same
+      // mini-stays-on-top regression because the host invoked their callback
+      // and bailed without flipping. The host now flips in BOTH branches.
+      final session = FakeCallSession();
+      final controller = _setupSingletonInMinimized(session: session);
+
+      var callbackCalls = 0;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (_, child) => OitVideoCallHost(
+            onExpandRequested: () => callbackCalls++,
+            child: child!,
+          ),
+          home: const Scaffold(body: SizedBox.expand()),
+        ),
+      );
+      await tester.pump();
+
+      expect(controller.state.mode, ActiveCallMode.minimized);
+
+      await tester.tap(find.byIcon(Icons.fullscreen));
+      // No pump — the flip must be synchronous so the host's listener
+      // removes the mini before the next frame, regardless of when (or
+      // whether) the app's callback eventually pushes a route.
+      expect(callbackCalls, 1);
+      expect(
+        controller.state.mode,
+        ActiveCallMode.connected,
+        reason: 'host must flip mode synchronously even when delegating the '
+            'route push to onExpandRequested',
+      );
+    },
+  );
+
+  testWidgets(
     'builder-wired host: tap End passes a Navigator-rooted context to confirmLeave',
     (tester) async {
       BuildContext? receivedContext;

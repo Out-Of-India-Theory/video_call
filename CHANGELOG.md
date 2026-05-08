@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.7
+
+- **fix**: Pre-flip from v1.2.6 is now symmetric — applied in both the
+  app-handled (`onExpandRequested`) AND plugin-handled branches of
+  `_onExpandRequested`. The earlier asymmetry left apps wiring
+  `onExpandRequested` (auto_route / go_router users — the recommended
+  router-aware path) exposed to the same mini-stays-on-top fragility that
+  motivated v1.2.6. New widget test asserts the synchronous flip on the
+  app-handled path.
+- **docs**: Updated the `_onExpandRequested` dartdoc to describe the new
+  pre-flip behavior accurately. Earlier wording still claimed "the host does
+  not call `c.expand()` directly" — stale since v1.2.6.
+
 ## 1.2.6
 
 - **fix**: Plugin-handled tap-to-expand now flips the controller out of
