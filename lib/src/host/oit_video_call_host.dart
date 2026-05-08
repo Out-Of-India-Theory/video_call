@@ -29,6 +29,7 @@ class OitVideoCallHost extends StatefulWidget {
     required this.child,
     this.minimizedBuilder,
     this.onExpandRequested,
+    this.navigatorKey,
   });
 
   /// The wrapped subtree — typically `MaterialApp`'s navigator.
@@ -48,6 +49,18 @@ class OitVideoCallHost extends StatefulWidget {
   /// Apps using auto_route / go_router should wire this to push their own
   /// call route so the navigator stack remains consistent.
   final VoidCallback? onExpandRequested;
+
+  /// Optional navigator key — pass the same `GlobalKey<NavigatorState>` you
+  /// hand to `MaterialApp.navigatorKey` / `MaterialApp.router`'s router
+  /// delegate. The host uses it to push the expand-route and to scope the
+  /// `confirmLeave` prompt for the mini's End button.
+  ///
+  /// **Strongly recommended in production apps.** Without it, the host falls
+  /// back to walking the element tree to find the topmost `NavigatorState` —
+  /// which works for canonical single-`MaterialApp` setups but isn't a
+  /// public framework contract and can pick the wrong navigator in
+  /// multi-`MaterialApp` / add-to-app / shell-embedded apps.
+  final GlobalKey<NavigatorState>? navigatorKey;
 
   @override
   State<OitVideoCallHost> createState() => _OitVideoCallHostState();
@@ -161,7 +174,15 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
     // than crash.
     final args = OitVideoCall.lastArgsOrNull;
     if (args == null) return;
-    Navigator.of(context, rootNavigator: true).push<void>(
+    // The host's [BuildContext] sits ABOVE the app's Navigator (apps wire
+    // the host through `MaterialApp.builder`, which puts us a level above
+    // the router), so `Navigator.of(context, rootNavigator: true)` walks up
+    // and finds nothing — push silently no-ops. Prefer the explicit
+    // [navigatorKey] when supplied; otherwise walk DOWN from the root
+    // element to find the topmost Navigator as a best-effort fallback.
+    final navigator = _resolveNavigator();
+    if (navigator == null) return;
+    navigator.push<void>(
       MaterialPageRoute<void>(
         builder: (_) => OitVideoCall.callScreen(
           callId: args.callId,
@@ -197,9 +218,55 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
     if (c.state.mode != ActiveCallMode.minimized) return;
     final confirm = OitVideoCall.lastArgsOrNull?.confirmLeave;
     if (confirm != null) {
-      final ok = await confirm(context);
+      // `confirm` (e.g. `showModalBottomSheet`) needs a context that has the
+      // app's Navigator above it. The host's own context sits above the
+      // Navigator, so we hand off the navigator-overlay's context — that's
+      // a descendant of the Navigator and resolves correctly.
+      final navigator = _resolveNavigator();
+      final overlayContext = navigator?.overlay?.context;
+      if (overlayContext == null) {
+        // No Navigator reachable. Bail without ending the call — silently
+        // ending a live consultation because of a transient lookup miss is
+        // worse than the user re-tapping once a navigator is mounted.
+        debugPrint(
+          'OitVideoCallHost: cannot show confirmLeave — no Navigator '
+          'reachable. Aborting end-call so the call is not silently '
+          'terminated without confirmation. Pass `navigatorKey` to skip '
+          'the down-tree walk.',
+        );
+        return;
+      }
+      final ok = await confirm(overlayContext);
       if (!ok || !mounted) return;
     }
     await c.endCall();
+  }
+
+  /// Returns the [NavigatorState] to use for tap-to-expand pushes and the
+  /// confirmLeave prompt scope. Prefers [OitVideoCallHost.navigatorKey] when
+  /// supplied (the recommended path), otherwise falls back to the down-tree
+  /// walk.
+  NavigatorState? _resolveNavigator() =>
+      widget.navigatorKey?.currentState ?? _findTopmostNavigator();
+
+  /// Walks down from [WidgetsBinding.rootElement] and returns the first
+  /// [NavigatorState] found in the element tree. Best-effort fallback for
+  /// callers that don't supply [OitVideoCallHost.navigatorKey] — works for
+  /// canonical single-`MaterialApp` setups but isn't a public framework
+  /// contract.
+  NavigatorState? _findTopmostNavigator() {
+    final root = WidgetsBinding.instance.rootElement;
+    if (root == null) return null;
+    NavigatorState? found;
+    void visit(Element element) {
+      if (found != null) return;
+      if (element is StatefulElement && element.state is NavigatorState) {
+        found = element.state as NavigatorState;
+        return;
+      }
+      element.visitChildren(visit);
+    }
+    root.visitChildren(visit);
+    return found;
   }
 }

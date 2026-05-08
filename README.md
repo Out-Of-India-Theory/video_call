@@ -119,12 +119,41 @@ OitVideoCallHost(
 ```
 
 The plugin-handled fallback (when `onExpandRequested` is null) pushes a
-`MaterialPageRoute` onto the root Navigator using
-`Navigator.of(context, rootNavigator: true)`. This works for plain
+`MaterialPageRoute` onto the topmost navigator. This works for plain
 `MaterialApp` setups but may bypass your custom router's bookkeeping —
 your router cannot pop or track the pushed route. Cupertino-styled apps
 should also wire this callback to get iOS-style transitions, since the
 fallback uses Material transitions only.
+
+### Navigator key (recommended in production)
+
+Wire `MaterialApp.navigatorKey` (or `MaterialApp.router`'s router-delegate
+key) and pass the same key to `OitVideoCallHost`:
+
+```dart
+final navigatorKey = GlobalKey<NavigatorState>();
+
+MaterialApp(
+  navigatorKey: navigatorKey,
+  builder: (ctx, child) => OitVideoCallHost(
+    navigatorKey: navigatorKey,
+    child: child!,
+  ),
+  ...
+)
+```
+
+The host needs a `NavigatorState` to (a) push the call screen back on
+tap-to-expand and (b) scope the `confirmLeave` prompt for the mini's End
+button. The host's own `BuildContext` sits **above** the navigator (apps
+wire it through `MaterialApp.builder`), so `Navigator.of(context, ...)`
+walks ancestors and finds nothing.
+
+Without `navigatorKey`, the host falls back to walking the element tree
+to find the topmost `NavigatorState` — which works for canonical
+single-`MaterialApp` apps but isn't a public framework contract. For
+multi-`MaterialApp` setups, add-to-app embeddings, or anything unusual at
+the root, the key is the robust path.
 
 ### Initialization order
 
