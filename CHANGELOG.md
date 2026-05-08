@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.8
+
+- **change**: Mini PiP now starts in the **bottom-right** corner instead of
+  top-right. Better match for the consumer / mitra UX expectation, and
+  keeps the floating window clear of the AppBar. The floating window is
+  still draggable and snaps to the nearest corner on release; this only
+  changes the initial corner.
+
 ## 1.2.7
 
 - **fix**: Pre-flip from v1.2.6 is now symmetric — applied in both the

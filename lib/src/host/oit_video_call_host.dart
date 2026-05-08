@@ -134,9 +134,13 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
         );
     // Stream's FloatingViewContainer provides drag + corner-snap for free.
     // We feed it the wrapped subtree as `child` and our card as `floatingView`.
+    // `bottomRight` matches the consumer / mitra UX expectation for PiP
+    // tiles and keeps the floating window away from the AppBar; Stream's
+    // default of `topRight` is overridden here.
     return FloatingViewContainer(
       floatingViewWidth: MinimizedCallView.width,
       floatingViewHeight: MinimizedCallView.height,
+      floatingViewAlignment: FloatingViewAlignment.bottomRight,
       floatingView: floatingView,
       child: widget.child,
     );
