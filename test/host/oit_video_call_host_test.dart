@@ -163,6 +163,44 @@ void main() {
   // -------------------------------------------------------------------
 
   testWidgets(
+    'builder-wired host: tap Fullscreen flips controller out of minimized synchronously',
+    (tester) async {
+      // Regression check for the v1.2.6 fix. Earlier versions deferred the
+      // mode flip to the new `CallScreen.initState`. Apps with complex
+      // builder trees (nested navigators, custom router delegates) saw the
+      // mini stay visible on top of the expanded call screen because the
+      // remount-driven flip never propagated to the host's listener. The
+      // host now flips mode itself in `_onExpandRequested` so the mini is
+      // removed in the same frame as the route push.
+      final session = FakeCallSession();
+      final controller = _setupSingletonInMinimized(session: session);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (_, child) => OitVideoCallHost(child: child!),
+          home: const Scaffold(body: SizedBox.expand()),
+        ),
+      );
+      await tester.pump();
+
+      expect(controller.state.mode, ActiveCallMode.minimized);
+      expect(find.byIcon(Icons.fullscreen), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.fullscreen));
+      // No pump yet — the flip must be synchronous, not deferred to a
+      // post-mount callback. The host's listener removes the mini overlay
+      // on the next rebuild.
+      expect(
+        controller.state.mode,
+        ActiveCallMode.connected,
+        reason: 'host must flip mode synchronously when tap-to-expand fires '
+            'so the mini disappears even if the new route\'s '
+            'CallScreen.initState never runs the fallback flip',
+      );
+    },
+  );
+
+  testWidgets(
     'builder-wired host: tap End passes a Navigator-rooted context to confirmLeave',
     (tester) async {
       BuildContext? receivedContext;

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.6
+
+- **fix**: Plugin-handled tap-to-expand now flips the controller out of
+  `minimized` mode synchronously inside the host's `_onExpandRequested`,
+  before pushing the call-screen route. The previous design deferred the
+  flip to the new `CallScreen.initState` (to avoid a one-frame gap). In
+  apps with complex builder trees (nested navigators / go_router /
+  auto_route delegates) the remount-driven flip didn't always propagate
+  to the host's listener, leaving the mini overlay on top of the expanded
+  call screen. Pre-flipping is reliable; the trade-off is a brief flash
+  of the underlying app during the route push animation. The init-state
+  flip remains in place as a no-op fallback for the
+  `OitVideoCallHost.onExpandRequested` (app-handled) path.
+
 ## 1.2.5
 
 - **feat**: `OitVideoCallHost` accepts an optional `navigatorKey` parameter.

@@ -182,6 +182,17 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
     // element to find the topmost Navigator as a best-effort fallback.
     final navigator = _resolveNavigator();
     if (navigator == null) return;
+    // Flip mode synchronously so the host removes the mini overlay in the
+    // same frame as the route push. Earlier versions deferred the flip to
+    // the new `CallScreen.initState`, but in apps with complex builder
+    // trees (nested navigators, go_router / auto_route delegates) the
+    // remount-driven flip proved fragile and the mini persisted on top of
+    // the expanded call screen. Pre-flipping is reliable; the trade-off is
+    // a brief flash of the underlying app during the route's push
+    // animation. The new `CallScreen.initState`'s flip becomes a no-op for
+    // this path (mode is already `connected`) and remains the trigger for
+    // the [onExpandRequested] / app-handled path.
+    c.expand();
     navigator.push<void>(
       MaterialPageRoute<void>(
         builder: (_) => OitVideoCall.callScreen(
