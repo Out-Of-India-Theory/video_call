@@ -11,8 +11,10 @@ Future<void> main() async {
 class ExampleApp extends StatelessWidget {
   const ExampleApp({super.key});
   @override
-  Widget build(BuildContext context) =>
-      MaterialApp(home: const HomePage());
+  Widget build(BuildContext context) => MaterialApp(
+        builder: (context, child) => OitVideoCallHost(child: child!),
+        home: const HomePage(),
+      );
 }
 
 class HomePage extends StatefulWidget {

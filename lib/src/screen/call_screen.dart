@@ -4,17 +4,17 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import '../active_call/active_call_controller.dart';
+import '../active_call/active_call_state.dart';
 import '../config.dart';
 import '../errors.dart';
-import 'call_session.dart';
 import 'error_view.dart';
 import 'permission_gate.dart';
 
 @visibleForTesting
 class CallScreenDeps {
-  const CallScreenDeps({this.session, this.permissionGate, this.openSettings});
+  const CallScreenDeps({this.permissionGate, this.openSettings});
 
-  final CallSession? session;
   final PermissionGate? permissionGate;
   final Future<bool> Function()? openSettings;
 }
@@ -23,6 +23,7 @@ class CallScreen extends StatefulWidget {
   const CallScreen({
     super.key,
     required this.config,
+    required this.controller,
     required this.callId,
     required this.callType,
     required this.audioOnly,
@@ -33,6 +34,13 @@ class CallScreen extends StatefulWidget {
   });
 
   final OitVideoCallConfig config;
+
+  /// Owns the call lifecycle (token fetch, connect, get-call, join). The
+  /// screen is now a pure consumer — it observes [controller.state] and
+  /// triggers a pop when the controller flips back to `idle` (e.g. natural
+  /// disconnect handled by a future task).
+  final ActiveCallController controller;
+
   final String callId;
   final String callType;
   final bool audioOnly;
@@ -77,10 +85,9 @@ class _Ready extends _Phase {
 }
 
 class _CallScreenState extends State<CallScreen> {
-  late final CallSession _session;
+  late final ActiveCallController _controller = widget.controller;
   late final PermissionGate _gate;
   late final Future<bool> Function() _openSettings;
-  Call? _call;
   _Phase _phase = _Loading();
 
   /// When `true`, the screen has decided to leave (user confirmed,
@@ -92,18 +99,34 @@ class _CallScreenState extends State<CallScreen> {
   @override
   void initState() {
     super.initState();
-    _session = widget.deps?.session ?? StreamCallSession();
     _gate = widget.deps?.permissionGate ?? RealPermissionGate();
     _openSettings = widget.deps?.openSettings ?? openAppSettings;
+    _controller.addListener(_onControllerChanged);
     // Keep the screen on for the duration of the call screen's lifetime.
     // Disabled in dispose. Fire-and-forget — wakelock_plus catches platform
     // exceptions internally and we don't want to gate _start() on it.
     WakelockPlus.enable();
+    // If we were just remounted via tap-to-expand from the host's mini
+    // overlay, the controller is in `minimized` mode. Flip it back to
+    // `connected` here (rather than from the host) so the mini overlay
+    // doesn't disappear for a frame before this screen has rendered. The
+    // call already has a live `Call`, so `_start()` below short-circuits
+    // through `connectAndJoin`'s "already connected" branch. We only flip
+    // when the callId matches — otherwise the host has pushed us for a
+    // different call while the controller is still minimized for an old
+    // one, and unconditionally flipping would corrupt the controller's
+    // state (mode=connected but callId pointing at the wrong call).
+    // `_start()` will then throw via `connectAndJoin`'s state check.
+    if (_controller.state.mode == ActiveCallMode.minimized &&
+        _controller.state.callId == widget.callId) {
+      _controller.expand();
+    }
     _start();
   }
 
   Future<void> _start() async {
-    // Phase 1: permissions
+    // Phase 1: permissions — stays in the screen because the "open settings"
+    // prompt requires BuildContext.
     final perm = await _gate.request(includeCamera: !widget.audioOnly);
     if (!mounted) return;
     if (!perm.granted) {
@@ -123,111 +146,49 @@ class _CallScreenState extends State<CallScreen> {
       return;
     }
 
-    // Phase 2: token
-    final String token;
-    try {
-      token = await widget.config.tokenProvider();
-    } catch (_) {
-      if (!mounted) return;
-      setState(
-        () => _phase = _Errored(
-          OitVideoCallErrorCode.tokenFetchFailed,
-          'Could not fetch call token.',
-        ),
-      );
-      return;
-    }
-
-    // Phase 3: connect
-    try {
-      final user = User.regular(
-        userId: widget.config.user.id,
-        name: widget.config.user.name,
-        image: widget.config.user.image,
-      );
-      await _session.connect(
-        apiKey: widget.config.apiKey,
-        user: user,
-        token: token,
-      );
-    } catch (_) {
-      if (!mounted) return;
-      setState(
-        () => _phase = _Errored(
-          OitVideoCallErrorCode.joinFailed,
-          'Could not connect to call service.',
-        ),
-      );
-      return;
-    }
-
-    // Phase 4: get call (no create) — or get-or-create if requested
-    final Call call;
-    try {
-      call = widget.createIfMissing
-          ? await _session.getOrCreateCall(
-              callType: widget.callType, callId: widget.callId)
-          : await _session.getCall(
-              callType: widget.callType, callId: widget.callId);
-    } on CallNotFoundError {
-      if (!mounted) return;
-      setState(
-        () => _phase = _Errored(
-          OitVideoCallErrorCode.callNotFound,
-          'Call not available.',
-        ),
-      );
-      return;
-    } catch (_) {
-      if (!mounted) return;
-      setState(
-        () => _phase = _Errored(
-          OitVideoCallErrorCode.joinFailed,
-          widget.createIfMissing
-              ? 'Could not start call.'
-              : 'Could not load call.',
-        ),
-      );
-      return;
-    }
-
-    // Phase 5: join
-    try {
-      await _session.joinCall(call);
-      if (widget.audioOnly) {
-        await _session.setCameraEnabled(call, false);
-      }
-    } catch (_) {
-      if (!mounted) return;
-      setState(
-        () => _phase = _Errored(
-          OitVideoCallErrorCode.joinFailed,
-          'Could not join call.',
-        ),
-      );
-      return;
-    }
-
+    // Phases 2–5 are owned by the controller now.
+    final result = await _controller.connectAndJoin(
+      config: widget.config,
+      callId: widget.callId,
+      callType: widget.callType,
+      audioOnly: widget.audioOnly,
+      createIfMissing: widget.createIfMissing,
+    );
     if (!mounted) return;
-    _call = call;
-    setState(() => _phase = _Ready(call));
+    setState(() {
+      _phase = switch (result) {
+        ConnectReady(:final call) => _Ready(call),
+        ConnectErrored(:final code, :final message) => _Errored(code, message),
+      };
+    });
+  }
+
+  void _onControllerChanged() {
+    // If the controller flips to idle while we're showing a live call
+    // (e.g. natural disconnect handled elsewhere — see Task 8), pop the
+    // screen out from under us. We deliberately ignore idle transitions
+    // that happen while the screen is in a non-Ready phase: those are
+    // triggered by [_retry] calling `controller.reset()` to free the
+    // state machine for another attempt, and popping the screen would
+    // defeat the purpose of the retry.
+    if (_controller.state.mode == ActiveCallMode.idle &&
+        _phase is _Ready &&
+        mounted) {
+      _triggerPop();
+    }
   }
 
   @override
   void dispose() {
-    if (_call != null) {
-      _session.leaveCall(_call!);
-    }
-    _session.dispose();
+    _controller.removeListener(_onControllerChanged);
     WakelockPlus.disable();
+    // No `leaveCall` here — controller owns the call lifecycle now.
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final scaffold = _buildScaffold();
-    final confirmLeave = widget.confirmLeave;
-    if (confirmLeave == null) return scaffold;
     return PopScope(
       // Once a leave is in flight we flip canPop so the next pop attempt
       // (scheduled in [_triggerPop]) actually pops instead of bouncing
@@ -235,13 +196,47 @@ class _CallScreenState extends State<CallScreen> {
       canPop: _leaveInProgress,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
+        // Connected → minimize (no confirm). Connecting → preserve v1
+        // confirmLeave behavior (cancel join). fastReconnecting also
+        // minimizes — the call is real, just temporarily lost.
+        final mode = _controller.state.mode;
+        if (mode == ActiveCallMode.connected ||
+            mode == ActiveCallMode.fastReconnecting) {
+          if (_controller.minimize()) {
+            // Pop the route now that we're minimized; the host's overlay
+            // takes over.
+            _triggerPop();
+          }
+          return;
+        }
+        // Connecting / errored: fall back to confirmLeave (existing behavior).
+        final confirmLeave = widget.confirmLeave;
+        if (confirmLeave == null) {
+          _triggerPop();
+          return;
+        }
         final shouldLeave = await confirmLeave(context);
         if (shouldLeave && mounted && context.mounted) {
+          await _controller.endCall();
           _triggerPop();
         }
       },
       child: scaffold,
     );
+  }
+
+  /// Handler for the in-call AppBar back arrow. When connected (or
+  /// recovering), minimize and pop directly so the user sees the mini view
+  /// immediately. Otherwise fall through to [PopScope] via `maybePop`,
+  /// which runs the same matrix (confirmLeave for connecting/errored).
+  void _onBackPressed() {
+    final mode = _controller.state.mode;
+    if (mode == ActiveCallMode.connected ||
+        mode == ActiveCallMode.fastReconnecting) {
+      if (_controller.minimize()) _triggerPop();
+      return;
+    }
+    Navigator.of(context).maybePop();
   }
 
   /// Single funnel for actually popping the call screen. Sets the
@@ -262,14 +257,17 @@ class _CallScreenState extends State<CallScreen> {
   /// app bar). Without this override, [StreamCallContainer] would call
   /// `call.leave()` *before* [confirmLeave] is shown — the call ends
   /// immediately and Cancel can't undo it, leaving the screen stuck on
-  /// "Connecting". Routing through here ensures we ask the user first and
-  /// only leave (via [_triggerPop] → `dispose` → `leaveCall`) on confirm.
+  /// "Connecting". Routing through here ensures we ask the user first and,
+  /// on confirm, end the call via the controller (mirroring the PopScope
+  /// no-minimize branch) before popping.
   Future<void> _onLeaveCallTap() async {
     final confirmLeave = widget.confirmLeave;
     if (confirmLeave != null) {
       final shouldLeave = await confirmLeave(context);
       if (!shouldLeave || !mounted) return;
     }
+    await _controller.endCall();
+    if (!mounted) return;
     _triggerPop();
   }
 
@@ -313,6 +311,7 @@ class _CallScreenState extends State<CallScreen> {
           pictureInPictureConfiguration: const PictureInPictureConfiguration(
             enablePictureInPicture: true,
           ),
+          onBackPressed: _onBackPressed,
           onLeaveCallTap: () => unawaited(_onLeaveCallTap()),
           onCallDisconnected: _onCallDisconnected,
         ),
@@ -321,6 +320,12 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   void _retry() {
+    // The controller refuses to re-connect when its state isn't `idle` — it
+    // would otherwise either silently return the existing call (not what we
+    // want after an error, since the failed attempt left no `Call` behind)
+    // or short-circuit to `connecting` and dead-end. Reset first so the
+    // state machine accepts the new attempt.
+    _controller.reset();
     setState(() => _phase = _Loading());
     _start();
   }

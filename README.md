@@ -66,12 +66,15 @@ Navigator.push(
 
 | Member | Description |
 |---|---|
-| `OitVideoCall.init(...)` | Stores config; does not connect. |
-| `OitVideoCall.callScreen({callId, audioOnly, callType, onCallEnded})` | Returns a widget; push with `MaterialPageRoute`. |
-| `OitVideoCall.reset()` | Tears down the singleton. |
+| `OitVideoCall.init(apiKey, user, tokenProvider)` | Stores config + builds the singleton controller. Does not connect. |
+| `OitVideoCall.callScreen({callId, audioOnly, callType, createIfMissing, onCallEnded, confirmLeave})` | Returns the call-screen widget; push with `MaterialPageRoute`. Caches its args so the PiP host can rebuild on tap-to-expand. |
+| `OitVideoCall.reset()` | Ends any active call, tears down the singleton, clears cached args. |
 | `OitVideoCall.isInitialized` | Whether `init()` was called. |
+| `OitVideoCallHost({child, minimizedBuilder?, onExpandRequested?})` | Wrap your `MaterialApp.builder` with this to enable in-app PiP. See "In-app Picture-in-Picture" below. |
+| `ActiveCallController` (read-only via `OitVideoCall.controllerOrThrow`) | Exposes `state` (mode, callId, live `Call`) for apps that want to react to call lifecycle. |
+| `ActiveCallMode`, `ActiveCallState` | State-machine types backing the controller. |
 | `VideoUser(id, name, image)` | The signed-in user. |
-| `OitVideoCallException`, `OitVideoCallErrorCode` | Error types — though no exceptions cross the public API in v1; all errors render inside the call screen. |
+| `OitVideoCallException`, `OitVideoCallErrorCode` | Error types — no exceptions cross the public API; all errors render inside the call screen. |
 
 ## Behavior
 
@@ -83,10 +86,67 @@ Navigator.push(
 - WebSocket opens on screen mount, closes on dispose. There is no persistent
   connection between calls.
 
+## In-app Picture-in-Picture
+
+Wrap your `MaterialApp` with `OitVideoCallHost` to enable the floating mini-window:
+
+```dart
+MaterialApp.router(
+  builder: (ctx, child) => OitVideoCallHost(
+    child: child!,
+    // Optional — wire to your router when using auto_route / go_router:
+    onExpandRequested: () => context.router.push(VideoCallRoute(callId: ...)),
+  ),
+  ...
+)
+```
+
+Behavior:
+- **Back press** while a call is connected → minimizes (no confirm).
+- **End-Call** button → still triggers `confirmLeave`.
+- **Tap** the mini view → expands back to full screen.
+- The mini view shows **the remote participant only**.
+
+### Routing integration
+
+Apps using `auto_route` or `go_router` should always supply `onExpandRequested`:
+
+```dart
+OitVideoCallHost(
+  child: child!,
+  onExpandRequested: () => context.router.push(VideoCallRoute(callId: ...)),
+)
+```
+
+The plugin-handled fallback (when `onExpandRequested` is null) pushes a
+`MaterialPageRoute` onto the root Navigator using
+`Navigator.of(context, rootNavigator: true)`. This works for plain
+`MaterialApp` setups but may bypass your custom router's bookkeeping —
+your router cannot pop or track the pushed route. Cupertino-styled apps
+should also wire this callback to get iOS-style transitions, since the
+fallback uses Material transitions only.
+
+### Initialization order
+
+`OitVideoCall.init(...)` and `OitVideoCallHost` can be wired in either order.
+The host listens to `OitVideoCall.activeControllerListenable`, so apps that
+init at startup *and* apps that init lazily (e.g. inside a "Join Call" handler
+once the user profile is loaded) both work — the host attaches the moment
+`init()` runs.
+
+### `confirmLeave` context lifetime
+
+The `confirmLeave: (BuildContext context) => ...` closure is invoked from
+multiple surfaces (the in-call End button, the back-press flow during
+connecting, and — new in 1.1.0 — the mini-view End button). Always use the
+`BuildContext` parameter rather than a captured context, since the closure may
+be invoked from a different widget tree than the one that built
+`OitVideoCall.callScreen(...)`.
+
 ## Out of scope (v1)
 
 - Push notifications / incoming-call ringing
-- Picture-in-picture / background calling
+- Background calling (system-level PiP)
 - Custom theming
 - Group calls, screen share, recording
 - Web / desktop platforms
