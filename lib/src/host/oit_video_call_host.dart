@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
 
@@ -137,10 +139,26 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
     // `bottomRight` matches the consumer / mitra UX expectation for PiP
     // tiles and keeps the floating window away from the AppBar; Stream's
     // default of `topRight` is overridden here.
+    //
+    // Stream's snap-offset math uses raw container dimensions and a single
+    // `floatingViewPadding` for all corners, with no `MediaQuery.viewPadding`
+    // awareness. With the default 16dp padding the bottom edge of the mini
+    // sits at `screenH - 16 - 160`, which overlaps the gesture-navigation
+    // indicator (~24-34dp on Pixel / iPhone). We bump the padding to clear
+    // the largest system inset (rounded up to 16dp minimum) so the mini's
+    // initial corner — and every corner it snaps to after a drag — stays
+    // clear of system UI.
+    final viewPadding = MediaQuery.viewPaddingOf(context);
+    final maxInset = math.max(
+      math.max(viewPadding.top, viewPadding.bottom),
+      math.max(viewPadding.left, viewPadding.right),
+    );
+    final floatingViewPadding = math.max(16.0, maxInset + 8.0);
     return FloatingViewContainer(
       floatingViewWidth: MinimizedCallView.width,
       floatingViewHeight: MinimizedCallView.height,
       floatingViewAlignment: FloatingViewAlignment.bottomRight,
+      floatingViewPadding: floatingViewPadding,
       floatingView: floatingView,
       child: widget.child,
     );
