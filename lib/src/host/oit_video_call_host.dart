@@ -142,26 +142,37 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
     );
   }
 
-  /// Two paths:
+  /// Both paths flip the controller out of `minimized` synchronously *before*
+  /// dispatching the route push. The earlier design deferred the flip to the
+  /// new `CallScreen.initState` (to avoid a one-frame gap where the mini
+  /// disappeared before the route mounted) but proved fragile in apps with
+  /// complex builder trees — nested navigators, go_router / auto_route
+  /// delegates — where the remount-driven flip didn't reliably reach the
+  /// host's listener and the mini persisted on top of the expanded call
+  /// screen. Pre-flipping is reliable; the trade-off is a brief flash of the
+  /// underlying app during the route's push animation. `CallScreen.initState`
+  /// keeps its own flip as a defensive no-op for direct external mounts.
+  ///
+  /// The two paths:
   ///
   ///   1. **App-handled** — when [OitVideoCallHost.onExpandRequested] is
-  ///      non-null, the app pushes its own call route (auto_route /
-  ///      go_router) so the navigator stack stays consistent with its
-  ///      router state.
-  ///   2. **Plugin-handled fallback** — push a [MaterialPageRoute] onto the
-  ///      root [Navigator] that rebuilds the call screen using the args
-  ///      cached on [OitVideoCall.lastArgsOrNull].
-  ///
-  /// The host does *not* call `c.expand()` directly. Both paths cause a new
-  /// [CallScreen] to be mounted, and that screen flips the controller back
-  /// to `connected` in its `initState` — at which point the host's listener
-  /// removes this overlay. Doing the flip from the screen avoids a one-frame
-  /// gap where the mini disappears before the route has rendered.
-  ///
-  /// The full route-pushing flow is exercised manually via the example app
-  /// smoke test in Task 9; see `test/screen/call_screen_test.dart` for the
-  /// `initState` flip unit test.
+  ///      non-null, the host flips mode then invokes the callback so the
+  ///      app pushes its own call route (auto_route / go_router) onto its
+  ///      router stack. Apps using a custom router should always wire this
+  ///      callback so the pushed route stays consistent with the router's
+  ///      bookkeeping.
+  ///   2. **Plugin-handled fallback** — host flips mode then pushes a
+  ///      [MaterialPageRoute] onto the resolved navigator (preferring
+  ///      [OitVideoCallHost.navigatorKey] when supplied, otherwise walking
+  ///      the element tree). The pushed route rebuilds the call screen using
+  ///      the args cached on [OitVideoCall.lastArgsOrNull].
   void _onExpandRequested(BuildContext context, ActiveCallController c) {
+    // Flip mode synchronously in BOTH paths so the host's listener removes
+    // the mini overlay regardless of whether the app's router or our
+    // fallback ends up doing the push. Asymmetry here was the v1.2.6 bug:
+    // pre-flipping only on the plugin-handled branch left app-handled
+    // callers exposed to the same fragility.
+    c.expand();
     if (widget.onExpandRequested != null) {
       widget.onExpandRequested!();
       return;
