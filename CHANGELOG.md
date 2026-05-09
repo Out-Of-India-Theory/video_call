@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.3.2
+
+- **fix (memory leak)**: `OitVideoCall.init()` and `initForTest()` now call
+  the new `ActiveCallController.cleanupForReinit()` on the previous
+  controller before installing the new one. Each `init()` (every "Join
+  Call" tap in the host apps) was previously orphaning a controller whose
+  `_callStateSub` (set after a successful join) kept a dead `Call` and
+  SDK session alive — a leak that accumulates across app sessions.
+  `cleanupForReinit()` synchronously cancels the subscription, sets the
+  controller to idle, then kicks off the network leave + SDK dispose as
+  fire-and-forget. The dispose's synchronous side-effect
+  (`StreamVideo.reset()`) clears the SDK singleton **before the call to
+  `_session.dispose()` returns**, so the new controller's
+  `connectAndJoin` can install a fresh `StreamVideo` without hitting the
+  "singleton already initialised" exception. New `facade_test.dart`
+  regression test asserts the old session sees `leaveCount == 1` and
+  `disposeCount == 1` *immediately* after `init()` returns (no
+  `await`s / `pump`s), locking in the synchronous-cleanup contract.
+
 ## 1.3.1
 
 - **fix**: OS-level Picture-in-Picture now fires when the app is
