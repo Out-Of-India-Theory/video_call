@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.3.1
+
+- **fix**: OS-level Picture-in-Picture now fires when the app is
+  backgrounded while the **in-app PiP** (mini view) is active.
+  Previously the system PiP only worked while the full-screen call
+  screen was on top — once the user pressed back to the mini, the
+  `StreamCallContainer` was unmounted and with it Stream's platform
+  PiP source views (`StreamPictureInPictureUiKitView` /
+  `StreamPictureInPictureAndroidView`). Backgrounding the app from the
+  mini just left the user on their home screen with no PiP. The host
+  now re-mounts those platform views (sized + hidden behind the app
+  for iOS, listener-only for Android) whenever the controller is
+  `minimized` and has a live `Call`, so OS PiP works in both states.
+- **fix (Android)**: `StreamPictureInPictureAndroidView` is now wrapped
+  in a screen-sized `Overlay` when mounted by the host. The host sits
+  above `MaterialApp`'s navigator (no `Overlay` ancestor reachable),
+  and Stream's view calls `Overlay.of(context).insert(...)` when the OS
+  triggers PiP — without the wrapper that throws "No Overlay widget
+  found in context" the moment the user backgrounds the app from the
+  mini view.
+- Two new widget tests cover the host's build-branch shape: returns the
+  child directly when not minimized, returns just `FloatingViewContainer`
+  when minimized but no live call.
+
 ## 1.3.0
 
 - **feat**: `ActiveCallController.endCall({bool forEveryone = false})`. When
