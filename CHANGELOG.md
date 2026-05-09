@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.3.3
+
+- **fix (Android)**: OS PiP now actually fires when the app is backgrounded
+  while in the **in-app PiP** (mini view) state. The v1.3.1 widget mount
+  alone wasn't enough: when the user pressed back from full-screen, the
+  route's pop animation took ~300ms, and only then did
+  `CallScreen.dispose` run — at which point the full-screen's
+  `StreamPictureInPictureAndroidView` fired its dispose-time
+  `setPictureInPictureAllowed(false)` AFTER our newly-mounted host view's
+  init-time `(true)`. The native flag ended up `false` and
+  `PictureInPictureHelper.handlePipTrigger` short-circuited on the next
+  background. Host now schedules a 500ms-delayed re-assert of
+  `setPictureInPictureAllowed(true)` whenever it transitions to
+  minimized, so our value lands LAST regardless of when the full-screen
+  view's dispose fires.
+
 ## 1.3.2
 
 - **fix (memory leak)**: `OitVideoCall.init()` and `initForTest()` now call

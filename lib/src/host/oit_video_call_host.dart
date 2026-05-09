@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
 
@@ -75,6 +77,10 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
   /// whose build output didn't actually change.
   bool _isMinimized = false;
 
+  /// Pending re-assertion of `setPictureInPictureAllowed(true)` — see
+  /// [_scheduleAndroidPipReassert] for the race it papers over.
+  Timer? _pipReassertTimer;
+
   @override
   void initState() {
     super.initState();
@@ -86,6 +92,7 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
   void dispose() {
     OitVideoCall.activeControllerListenable.removeListener(_onActiveControllerChanged);
     _controller?.removeListener(_onChange);
+    _pipReassertTimer?.cancel();
     super.dispose();
   }
 
@@ -115,7 +122,45 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
     final next = _controller?.state.mode == ActiveCallMode.minimized;
     if (next != _isMinimized) {
       setState(() => _isMinimized = next);
+      if (next &&
+          _controller?.state.call != null &&
+          CurrentPlatform.isAndroid) {
+        _scheduleAndroidPipReassert();
+      }
     }
+  }
+
+  /// Workaround for a Stream-SDK race that breaks OS-level PiP after the
+  /// in-app PiP transition.
+  ///
+  /// Sequence: user is in the full-screen call route (which mounts its own
+  /// `StreamPictureInPictureAndroidView` inside `StreamCallContainer`).
+  /// They press back → `minimize()` flips the controller mode →
+  /// `_triggerPop` schedules `Navigator.pop`. The route's pop animation
+  /// runs ~300ms before `CallScreen.dispose` actually fires; only THEN
+  /// does the SDK's view dispose, calling
+  /// `AndroidPipManager.setPictureInPictureAllowed(false)` on Stream's
+  /// native helper. By that time, the host's *new* (minimized-state)
+  /// `StreamPictureInPictureAndroidView` has already mounted and called
+  /// `setPictureInPictureAllowed(true)` from its initState. The late
+  /// dispose-set-false races AFTER the init-set-true and wins, leaving
+  /// the native flag at `false` — so when the user backgrounds the app
+  /// from the mini, `PictureInPictureHelper.handlePipTrigger` sees the
+  /// flag as false and doesn't call `enterPictureInPictureMode`.
+  ///
+  /// Re-assert `(true)` *after* the route animation has settled so our
+  /// value lands LAST. 500ms is well past Material's default 300ms route
+  /// transition; if anyone tweaks the transition duration to be longer,
+  /// the OS PiP would simply require an extra background-tap to engage —
+  /// not a crash, just a UX regression — so the magic number is forgiving.
+  void _scheduleAndroidPipReassert() {
+    _pipReassertTimer?.cancel();
+    _pipReassertTimer = Timer(const Duration(milliseconds: 500), () {
+      if (!mounted) return;
+      if (_controller?.state.mode != ActiveCallMode.minimized) return;
+      if (_controller?.state.call == null) return;
+      AndroidPipManager.instance().setPictureInPictureAllowed(true);
+    });
   }
 
   @override
