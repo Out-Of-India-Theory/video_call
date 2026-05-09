@@ -36,6 +36,17 @@ abstract class CallSession {
 
   Future<void> leaveCall(Call call);
 
+  /// Ends the call for **all** participants on the Stream coordinator. Use
+  /// for "host ends the room" semantics — e.g. an astrologer marking a
+  /// consultation complete should drop both their own and the customer's
+  /// connections, not just leave the call themselves. Requires the local
+  /// user to have `end-call` permission on the call type; the SDK returns
+  /// an error otherwise. The Stream SDK calls `_session.leave()` internally
+  /// before the server-side end, so the local user is out either way — the
+  /// only difference between this and [leaveCall] is whether the remote
+  /// participants are also disconnected.
+  Future<void> endCallForEveryone(Call call);
+
   Future<void> dispose();
 }
 
@@ -108,6 +119,16 @@ class StreamCallSession implements CallSession {
   @override
   Future<void> leaveCall(Call call) async {
     await call.leave();
+  }
+
+  @override
+  Future<void> endCallForEveryone(Call call) async {
+    final result = await call.end();
+    if (result.isFailure) {
+      // Permission denied / invalid state. Caller falls back to leaveCall.
+      final failure = result as Failure;
+      throw Exception('call.end() failed: ${failure.error}');
+    }
   }
 
   @override

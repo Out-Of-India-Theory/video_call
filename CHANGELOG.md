@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.3.0
+
+- **feat**: `ActiveCallController.endCall({bool forEveryone = false})`. When
+  `forEveryone: true`, the host attempts to terminate the call for **all**
+  participants on the Stream coordinator (via `Call.end()`) rather than
+  just leaving. Falls back to a plain leave if the server rejects the
+  end-for-all request (typically a permission issue) so the local user is
+  always out regardless. Default `false` preserves the original "leave only"
+  behavior for back-press / mini-End / natural-disconnect paths.
+- **feat (CallSession)**: New `endCallForEveryone(Call)` abstract method on
+  the test seam. `StreamCallSession` implements it via `Call.end()`;
+  `FakeCallSession` adds `endForEveryoneCount` + `endForEveryoneError`.
+- Two new lifecycle tests cover the happy path (room terminated, leaveCall
+  not called) and the fallback path (server rejects end-for-all → leaveCall
+  runs).
+
+Use case: the mitra app's order-completion flow can now drop both the
+astrologer's and the customer's connections in one step. Apps that don't
+opt in are unaffected.
+
 ## 1.2.9
 
 - **revert**: Drop the dynamic `floatingViewPadding` heuristic added in

@@ -35,6 +35,8 @@ class FakeCallSession implements CallSession {
   int getOrCreateCount = 0;
   int joinCount = 0;
   int leaveCount = 0;
+  int endForEveryoneCount = 0;
+  Object? endForEveryoneError;
   int disposeCount = 0;
   final List<bool> cameraEnabledCalls = <bool>[];
 
@@ -106,6 +108,12 @@ class FakeCallSession implements CallSession {
   Future<void> leaveCall(Call call) async {
     leaveCount++;
     if (leaveError != null) throw leaveError!;
+  }
+
+  @override
+  Future<void> endCallForEveryone(Call call) async {
+    endForEveryoneCount++;
+    if (endForEveryoneError != null) throw endForEveryoneError!;
   }
 
   @override

@@ -258,6 +258,47 @@ void main() {
       expect(session.disposeCount, 0);
     });
 
+    test('endCall(forEveryone: true) terminates the room via call.end()', () async {
+      // Mitra-side path: an astrologer marking a consultation complete ends
+      // the call for everyone, not just leaves. The fake records the
+      // end-for-everyone hit; the regular `leaveCall` is NOT called because
+      // call.end() handles the local leave internally on Stream's side.
+      await controller.connectAndJoin(
+        config: config,
+        callId: 'c1',
+        callType: 'default',
+        audioOnly: false,
+        createIfMissing: false,
+      );
+
+      await controller.endCall(forEveryone: true);
+      expect(controller.state.mode, ActiveCallMode.idle);
+      expect(session.endForEveryoneCount, 1);
+      expect(session.leaveCount, 0);
+      expect(session.disposeCount, 1);
+    });
+
+    test('endCall(forEveryone: true) falls back to leaveCall when end() fails', () async {
+      // call.end() requires `end-call` permission; Stream returns an error
+      // otherwise. We fall back to a plain leave so the local user is at
+      // least out of the call. The customer stays connected, but the
+      // mitra-side teardown is graceful.
+      await controller.connectAndJoin(
+        config: config,
+        callId: 'c1',
+        callType: 'default',
+        audioOnly: false,
+        createIfMissing: false,
+      );
+      session.endForEveryoneError = Exception('permission denied');
+
+      await controller.endCall(forEveryone: true);
+      expect(controller.state.mode, ActiveCallMode.idle);
+      expect(session.endForEveryoneCount, 1);
+      expect(session.leaveCount, 1);
+      expect(session.disposeCount, 1);
+    });
+
     test('endCall swallows leave errors (best-effort)', () async {
       await controller.connectAndJoin(
         config: config,
