@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.5
+
+- **chore (UX)**: revert the v1.3.4 mini bump on Android. iOS keeps the
+  larger 180×240 tile (system-PiP feel — iOS FaceTime's medium tile is
+  ~200×356), Android goes back to the original 120×160 to preserve
+  existing layouts. `MinimizedCallView.width` / `MinimizedCallView.height`
+  switched from `static const` to platform-aware `static get` returning
+  the per-OS value at runtime — `const` was incompatible with the
+  branch. No API change for callers (they were already reading via the
+  static accessors); the host's `floatingViewWidth` /
+  `floatingViewHeight` flow through unchanged.
+
 ## 1.3.4
 
 - **chore (UX)**: enlarge the in-app PiP tile from 120×160 to 180×240 — same

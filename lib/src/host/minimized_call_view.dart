@@ -65,14 +65,17 @@ class MinimizedCallView extends StatelessWidget {
   final VoidCallback onEnd;
 
   /// Width passed to Stream's [FloatingViewContainer] by the host.
-  /// 180×240 keeps the same 3:4 portrait ratio as the original 120×160 but
-  /// 50% larger in each dimension (~2.25× the area), bringing it closer to
-  /// system-PiP feel (e.g. iOS FaceTime's medium tile is ~200×356) while
-  /// still leaving most of the underlying app visible.
-  static const double width = 180;
+  ///
+  /// Platform-split: 180dp on iOS, 120dp on Android. The iOS bump (50%
+  /// larger in each dimension, ~2.25× the area) brings the tile closer to
+  /// system-PiP feel — iOS FaceTime's medium tile is ~200×356 — while
+  /// Android's smaller default keeps existing layouts undisturbed.
+  /// 3:4 portrait ratio preserved on both platforms.
+  static double get width => CurrentPlatform.isIos ? 180 : 120;
 
   /// Height passed to Stream's [FloatingViewContainer] by the host.
-  static const double height = 240;
+  /// See [width] for the platform-split rationale.
+  static double get height => CurrentPlatform.isIos ? 240 : 160;
 
   @override
   Widget build(BuildContext context) {
