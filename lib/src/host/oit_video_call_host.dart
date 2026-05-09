@@ -292,14 +292,20 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
     return Stack(
       children: [
         // iOS: a `UiKitView` that the OS captures into the system PiP
-        // window. Sized 300×600 (matching `StreamCallContainer`'s own
-        // mounting) and positioned at top-left where the floating
-        // container will fully cover it. Visible to Flutter but hidden
-        // from the user behind the app content; the OS sees it.
+        // window. Mirrors `StreamCallContainer`'s own mounting *exactly*
+        // — non-Positioned `SizedBox(300, 600)`, default Stack alignment
+        // (top-start). The full-screen path works; the in-app PiP path
+        // didn't when this was wrapped in `Positioned(top: 0, left: 0,
+        // width: 300, height: 600)` even though that should be
+        // geometrically identical. Mixing Positioned and non-Positioned
+        // children in a Stack routes through different RenderObject
+        // paths; some platform-view compositing edge cases on iOS only
+        // surface in the Positioned path and prevent
+        // `AVPictureInPictureController` from registering the view as a
+        // valid PiP source. Matching Stream's own pattern verbatim
+        // bypasses that.
         if (CurrentPlatform.isIos)
-          Positioned(
-            top: 0,
-            left: 0,
+          SizedBox(
             width: 300,
             height: 600,
             child: StreamPictureInPictureUiKitView(
