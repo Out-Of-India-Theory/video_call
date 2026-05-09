@@ -34,9 +34,11 @@ CallParticipantState? pickMinimizedParticipant(
 /// by [OitVideoCallHost] when the active call is minimized.
 ///
 /// Drag + corner-snap is provided by the surrounding [FloatingViewContainer];
-/// this widget renders only the inner card content (120x160dp dark Material
-/// card with rounded corners). The participant rendered in the tile is chosen
-/// by [pickMinimizedParticipant] — see its dartdoc for the precedence rules.
+/// this widget renders only the inner card content — a dark Material card
+/// with rounded corners, sized to [width] × [height] (the single source of
+/// truth that the host also passes into the floating container). The
+/// participant rendered in the tile is chosen by [pickMinimizedParticipant]
+/// — see its dartdoc for the precedence rules.
 ///
 /// "Connecting…" only shows if the participant list is empty (call object
 /// not yet built, or every participant left). Bottom strip exposes three
@@ -63,10 +65,14 @@ class MinimizedCallView extends StatelessWidget {
   final VoidCallback onEnd;
 
   /// Width passed to Stream's [FloatingViewContainer] by the host.
-  static const double width = 120;
+  /// 180×240 keeps the same 3:4 portrait ratio as the original 120×160 but
+  /// 50% larger in each dimension (~2.25× the area), bringing it closer to
+  /// system-PiP feel (e.g. iOS FaceTime's medium tile is ~200×356) while
+  /// still leaving most of the underlying app visible.
+  static const double width = 180;
 
   /// Height passed to Stream's [FloatingViewContainer] by the host.
-  static const double height = 160;
+  static const double height = 240;
 
   @override
   Widget build(BuildContext context) {
