@@ -382,11 +382,16 @@ class ActiveCallController extends ChangeNotifier {
       if (forEveryone) {
         try {
           await _session.endCallForEveryone(call);
-          // call.end() also leaves locally as a side effect, so the
-          // fallback below would short-circuit if it fires. Skip it.
         } catch (_) {
-          // Permission denied / invalid call status. Fall back to a
-          // plain leave so we at least exit the call from our side.
+          // Two distinct failure modes for `Call.end()`:
+          //   1. Invalid status (e.g. fastReconnecting): SDK rejects
+          //      BEFORE running its internal local leave. Fallback below
+          //      is required — it's the only way the local user exits.
+          //   2. Permission denied / HTTP failure: SDK already ran the
+          //      local leave side-effect before the throw. Fallback is a
+          //      redundant no-op (harmless — `Call.leave()` is idempotent).
+          // We can't distinguish the modes from here; always run the
+          // fallback so the local user is always out of the call.
           try {
             await _session.leaveCall(call);
           } catch (_) {
@@ -401,7 +406,12 @@ class ActiveCallController extends ChangeNotifier {
         }
       }
     }
-    await _session.dispose();
+    try {
+      await _session.dispose();
+    } catch (_) {
+      // best-effort — never let teardown errors bubble up to callers.
+      // Apps should be able to call endCall without wrapping in try/catch.
+    }
     _state = ActiveCallState.idle;
     notifyListeners();
   }

@@ -40,11 +40,18 @@ abstract class CallSession {
   /// for "host ends the room" semantics — e.g. an astrologer marking a
   /// consultation complete should drop both their own and the customer's
   /// connections, not just leave the call themselves. Requires the local
-  /// user to have `end-call` permission on the call type; the SDK returns
-  /// an error otherwise. The Stream SDK calls `_session.leave()` internally
-  /// before the server-side end, so the local user is out either way — the
-  /// only difference between this and [leaveCall] is whether the remote
-  /// participants are also disconnected.
+  /// user to have `end-call` permission on the call type.
+  ///
+  /// Throws on failure. Two distinct failure modes:
+  ///   * **Invalid call status** (e.g. fastReconnecting): the SDK throws
+  ///     *before* running its internal local-leave side-effect. The local
+  ///     user is still in the call.
+  ///   * **Permission denied / server error**: the SDK has already run
+  ///     `_session.leave()` locally and only the server-end-call request
+  ///     fails. The local user is already out.
+  ///
+  /// Callers must be prepared to fall back to [leaveCall] on either —
+  /// it's redundant for the second mode but required for the first.
   Future<void> endCallForEveryone(Call call);
 
   Future<void> dispose();

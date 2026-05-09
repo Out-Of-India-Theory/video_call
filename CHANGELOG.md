@@ -9,16 +9,25 @@
   end-for-all request (typically a permission issue) so the local user is
   always out regardless. Default `false` preserves the original "leave only"
   behavior for back-press / mini-End / natural-disconnect paths.
+- **feat**: `OitVideoCall.endCall({bool forEveryone = false})` static
+  facade method. Apps can call this directly without reaching across the
+  controller boundary, mirroring `OitVideoCall.reset()` etc.
 - **feat (CallSession)**: New `endCallForEveryone(Call)` abstract method on
   the test seam. `StreamCallSession` implements it via `Call.end()`;
-  `FakeCallSession` adds `endForEveryoneCount` + `endForEveryoneError`.
-- Two new lifecycle tests cover the happy path (room terminated, leaveCall
-  not called) and the fallback path (server rejects end-for-all → leaveCall
-  runs).
+  `FakeCallSession` adds `endForEveryoneCount` + `endForEveryoneError` +
+  `disposeError`.
+- **fix**: `endCall()` now wraps `_session.dispose()` in try/catch (was
+  the only un-wrapped call in the teardown chain). Hosts can now `await
+  endCall()` without try/catch — no error path bubbles out to the app.
+- Three new lifecycle tests cover the happy path (room terminated,
+  leaveCall not called), the fallback path (`Call.end()` throws →
+  `leaveCall` runs), and the dispose-error path (StreamVideo.reset
+  throws → endCall returns idle without re-throwing).
 
 Use case: the mitra app's order-completion flow can now drop both the
-astrologer's and the customer's connections in one step. Apps that don't
-opt in are unaffected.
+astrologer's and the customer's connections in one step via
+`OitVideoCall.endCall(forEveryone: true)`. Apps that don't opt in are
+unaffected.
 
 ## 1.2.9
 

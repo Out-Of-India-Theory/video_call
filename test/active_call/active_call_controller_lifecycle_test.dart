@@ -279,10 +279,19 @@ void main() {
     });
 
     test('endCall(forEveryone: true) falls back to leaveCall when end() fails', () async {
-      // call.end() requires `end-call` permission; Stream returns an error
-      // otherwise. We fall back to a plain leave so the local user is at
-      // least out of the call. The customer stays connected, but the
-      // mitra-side teardown is graceful.
+      // Stream's `Call.end()` has two failure modes:
+      //   1. Invalid status (e.g. fastReconnecting) — SDK throws BEFORE
+      //      running its internal local leave. Fallback is REQUIRED to
+      //      exit the call.
+      //   2. Permission denied / HTTP failure — SDK already ran the
+      //      local leave before throwing. Fallback is a redundant
+      //      no-op (harmless, `Call.leave()` is idempotent).
+      // The fake throws on demand without distinguishing; the controller
+      // can't distinguish either, so it always runs the fallback. This
+      // test asserts the fallback fires regardless of which mode threw —
+      // a future refactor that drops the fallback for "permission denied"
+      // would silently regress the invalid-status case, so the assertion
+      // on `leaveCount == 1` is load-bearing.
       await controller.connectAndJoin(
         config: config,
         callId: 'c1',
@@ -296,6 +305,28 @@ void main() {
       expect(controller.state.mode, ActiveCallMode.idle);
       expect(session.endForEveryoneCount, 1);
       expect(session.leaveCount, 1);
+      expect(session.disposeCount, 1);
+    });
+
+    test('endCall swallows session.dispose() errors without throwing', () async {
+      // Reviewer carry-forward: dispose() was the only un-wrapped call in
+      // endCall's teardown — if `StreamVideo.reset()` ever threw, the
+      // exception would surface to the host app (e.g. the mitra's order-
+      // completion flow showing a generic error toast despite the call
+      // tearing down successfully). The wrap ensures the host never has
+      // to try/catch around an `OitVideoCall.endCall()` call.
+      await controller.connectAndJoin(
+        config: config,
+        callId: 'c1',
+        callType: 'default',
+        audioOnly: false,
+        createIfMissing: false,
+      );
+      session.disposeError = Exception('stream reset failed');
+
+      // Should NOT throw.
+      await controller.endCall(forEveryone: true);
+      expect(controller.state.mode, ActiveCallMode.idle);
       expect(session.disposeCount, 1);
     });
 
