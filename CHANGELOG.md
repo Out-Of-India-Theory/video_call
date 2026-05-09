@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.4
+
+- **chore (UX)**: enlarge the in-app PiP tile from 120×160 to 180×240 — same
+  3:4 portrait ratio, 50% bigger in each dimension (~2.25× the area).
+  Brings the floating mini closer to system-PiP feel (iOS FaceTime's
+  medium tile is ~200×356) and makes the remote participant's face
+  legible at a glance during a consultation, without crowding the
+  underlying app. No API surface changes; consumers reading
+  `MinimizedCallView.width` / `MinimizedCallView.height` (or hosts that
+  pass these into a custom `floatingViewWidth`/`floatingViewHeight`)
+  pick up the new dimensions automatically.
+
 ## 1.3.3
 
 - **fix (Android)**: OS PiP now actually fires when the app is backgrounded
