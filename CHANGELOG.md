@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.5
+
+- **chore (UX)**: split mini size by platform. iOS now 170×230 (trimmed
+  ~10dp off the v1.3.4 180×240 — still noticeably larger than the
+  baseline, no longer feels oversized), Android reverts to the original
+  120×160. `MinimizedCallView.width` / `MinimizedCallView.height`
+  switched from `static const` to platform-aware `static get` returning
+  the per-OS value at runtime — `const` was incompatible with the
+  branch. No API change for callers (they were already reading via the
+  static accessors); the host's `floatingViewWidth` /
+  `floatingViewHeight` flow through unchanged.
+
 ## 1.3.4
 
 - **chore (UX)**: enlarge the in-app PiP tile from 120×160 to 180×240 — same
