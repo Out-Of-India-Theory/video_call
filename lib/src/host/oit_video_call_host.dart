@@ -145,12 +145,58 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
     // Material chrome accounts for status bar / gesture indicator). An
     // earlier dynamic-padding heuristic (max(16, viewPadding + 8)) shifted
     // the mini noticeably toward the middle in those layouts.
-    return FloatingViewContainer(
+    final floatingContainer = FloatingViewContainer(
       floatingViewWidth: MinimizedCallView.width,
       floatingViewHeight: MinimizedCallView.height,
       floatingViewAlignment: FloatingViewAlignment.bottomRight,
       floatingView: floatingView,
       child: widget.child,
+    );
+
+    // Stream's platform PiP source views need to be in the widget tree
+    // for the OS to pick them up when the app is backgrounded. While the
+    // user is in the full-screen call route, `StreamCallContainer` mounts
+    // these itself; once the route is popped (in-app PiP active), they
+    // disappear and OS-level PiP stops working — the user backgrounds the
+    // app and sees their home screen instead of a system PiP window. We
+    // re-mount them here so OS PiP works whether the user is in
+    // full-screen or minimized. Only do so when there's a live `Call` —
+    // the platform views require a non-null `call`.
+    final call = c.state.call;
+    if (call == null) return floatingContainer;
+    const pipConfig = PictureInPictureConfiguration(
+      enablePictureInPicture: true,
+    );
+    return Stack(
+      children: [
+        // iOS: a `UiKitView` that the OS captures into the system PiP
+        // window. Sized 300×600 (matching `StreamCallContainer`'s own
+        // mounting) and positioned at top-left where the floating
+        // container will fully cover it. Visible to Flutter but hidden
+        // from the user behind the app content; the OS sees it.
+        if (CurrentPlatform.isIos)
+          Positioned(
+            top: 0,
+            left: 0,
+            width: 300,
+            height: 600,
+            child: StreamPictureInPictureUiKitView(
+              call: call,
+              pictureInPictureConfiguration: pipConfig,
+            ),
+          ),
+        // The app + the floating mini, covering the entire host area.
+        Positioned.fill(child: floatingContainer),
+        // Android: a listener-only widget that builds `SizedBox.shrink`.
+        // Drives the system PiP overlay via `AndroidPipManager`. Stacked
+        // above the app so its `Overlay`-injected PiP UI lands on top
+        // when the OS triggers PiP.
+        if (CurrentPlatform.isAndroid)
+          StreamPictureInPictureAndroidView(
+            call: call,
+            configuration: pipConfig,
+          ),
+      ],
     );
   }
 

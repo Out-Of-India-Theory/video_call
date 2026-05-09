@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.1
+
+- **fix**: OS-level Picture-in-Picture now fires when the app is
+  backgrounded while the **in-app PiP** (mini view) is active.
+  Previously the system PiP only worked while the full-screen call
+  screen was on top — once the user pressed back to the mini, the
+  `StreamCallContainer` was unmounted and with it Stream's platform
+  PiP source views (`StreamPictureInPictureUiKitView` /
+  `StreamPictureInPictureAndroidView`). Backgrounding the app from the
+  mini just left the user on their home screen with no PiP. The host
+  now re-mounts those platform views (sized + hidden behind the app
+  for iOS, listener-only for Android) whenever the controller is
+  `minimized` and has a live `Call`, so OS PiP works in both states.
+
 ## 1.3.0
 
 - **feat**: `ActiveCallController.endCall({bool forEveryone = false})`. When
