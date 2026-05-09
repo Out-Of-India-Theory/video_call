@@ -109,6 +109,22 @@ class OitVideoCall {
     activeControllerListenable.value = null;
   }
 
+  /// Ends the active call (if any) without tearing down the singleton.
+  /// Delegates to [ActiveCallController.endCall].
+  ///
+  /// When [forEveryone] is true, attempts to terminate the call for all
+  /// participants on the Stream coordinator (used by the mitra-side
+  /// order-completion flow to close the room when an astrologer marks a
+  /// consultation complete). Falls back to a plain leave if the server
+  /// rejects the end-for-all request so the local user is always out.
+  ///
+  /// Errors during teardown are swallowed inside the controller; this
+  /// never throws. No-op when [init] hasn't been called or the controller
+  /// is already idle.
+  static Future<void> endCall({bool forEveryone = false}) async {
+    await _controller?.endCall(forEveryone: forEveryone);
+  }
+
   static Widget callScreen({
     required String callId,
     bool audioOnly = false,

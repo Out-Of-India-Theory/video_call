@@ -258,6 +258,78 @@ void main() {
       expect(session.disposeCount, 0);
     });
 
+    test('endCall(forEveryone: true) terminates the room via call.end()', () async {
+      // Mitra-side path: an astrologer marking a consultation complete ends
+      // the call for everyone, not just leaves. The fake records the
+      // end-for-everyone hit; the regular `leaveCall` is NOT called because
+      // call.end() handles the local leave internally on Stream's side.
+      await controller.connectAndJoin(
+        config: config,
+        callId: 'c1',
+        callType: 'default',
+        audioOnly: false,
+        createIfMissing: false,
+      );
+
+      await controller.endCall(forEveryone: true);
+      expect(controller.state.mode, ActiveCallMode.idle);
+      expect(session.endForEveryoneCount, 1);
+      expect(session.leaveCount, 0);
+      expect(session.disposeCount, 1);
+    });
+
+    test('endCall(forEveryone: true) falls back to leaveCall when end() fails', () async {
+      // Stream's `Call.end()` has two failure modes:
+      //   1. Invalid status (e.g. fastReconnecting) — SDK throws BEFORE
+      //      running its internal local leave. Fallback is REQUIRED to
+      //      exit the call.
+      //   2. Permission denied / HTTP failure — SDK already ran the
+      //      local leave before throwing. Fallback is a redundant
+      //      no-op (harmless, `Call.leave()` is idempotent).
+      // The fake throws on demand without distinguishing; the controller
+      // can't distinguish either, so it always runs the fallback. This
+      // test asserts the fallback fires regardless of which mode threw —
+      // a future refactor that drops the fallback for "permission denied"
+      // would silently regress the invalid-status case, so the assertion
+      // on `leaveCount == 1` is load-bearing.
+      await controller.connectAndJoin(
+        config: config,
+        callId: 'c1',
+        callType: 'default',
+        audioOnly: false,
+        createIfMissing: false,
+      );
+      session.endForEveryoneError = Exception('permission denied');
+
+      await controller.endCall(forEveryone: true);
+      expect(controller.state.mode, ActiveCallMode.idle);
+      expect(session.endForEveryoneCount, 1);
+      expect(session.leaveCount, 1);
+      expect(session.disposeCount, 1);
+    });
+
+    test('endCall swallows session.dispose() errors without throwing', () async {
+      // Reviewer carry-forward: dispose() was the only un-wrapped call in
+      // endCall's teardown — if `StreamVideo.reset()` ever threw, the
+      // exception would surface to the host app (e.g. the mitra's order-
+      // completion flow showing a generic error toast despite the call
+      // tearing down successfully). The wrap ensures the host never has
+      // to try/catch around an `OitVideoCall.endCall()` call.
+      await controller.connectAndJoin(
+        config: config,
+        callId: 'c1',
+        callType: 'default',
+        audioOnly: false,
+        createIfMissing: false,
+      );
+      session.disposeError = Exception('stream reset failed');
+
+      // Should NOT throw.
+      await controller.endCall(forEveryone: true);
+      expect(controller.state.mode, ActiveCallMode.idle);
+      expect(session.disposeCount, 1);
+    });
+
     test('endCall swallows leave errors (best-effort)', () async {
       await controller.connectAndJoin(
         config: config,

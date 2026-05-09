@@ -35,7 +35,10 @@ class FakeCallSession implements CallSession {
   int getOrCreateCount = 0;
   int joinCount = 0;
   int leaveCount = 0;
+  int endForEveryoneCount = 0;
+  Object? endForEveryoneError;
   int disposeCount = 0;
+  Object? disposeError;
   final List<bool> cameraEnabledCalls = <bool>[];
 
   _FakeCall? _call;
@@ -109,8 +112,15 @@ class FakeCallSession implements CallSession {
   }
 
   @override
+  Future<void> endCallForEveryone(Call call) async {
+    endForEveryoneCount++;
+    if (endForEveryoneError != null) throw endForEveryoneError!;
+  }
+
+  @override
   Future<void> dispose() async {
     disposeCount++;
+    if (disposeError != null) throw disposeError!;
   }
 }
 

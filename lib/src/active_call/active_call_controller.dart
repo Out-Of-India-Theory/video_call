@@ -340,7 +340,16 @@ class ActiveCallController extends ChangeNotifier {
   }
 
   /// Permanent end. Tears down the SDK call, resets state, notifies.
-  Future<void> endCall() async {
+  ///
+  /// When [forEveryone] is true, attempts to terminate the call for **all**
+  /// participants on the Stream coordinator (used by the mitra app when an
+  /// astrologer marks a consultation complete — the customer's connection
+  /// is severed too). Falls back to a plain leave if the server rejects
+  /// the end-for-all request (typically a permission issue) so the local
+  /// user is always out regardless. Default `false` preserves the original
+  /// "leave only" behavior for back-press / mini-End / natural-disconnect
+  /// paths.
+  Future<void> endCall({bool forEveryone = false}) async {
     // Idempotent: a no-op when already idle, and a no-op when a previous
     // invocation is still in flight (`ending`). The first guard prevents
     // spurious `ending → idle` notification cycles on duplicate calls (e.g.
@@ -370,13 +379,39 @@ class ActiveCallController extends ChangeNotifier {
     _state = _state.copyWith(mode: ActiveCallMode.ending);
     notifyListeners();
     if (call != null) {
-      try {
-        await _session.leaveCall(call);
-      } catch (_) {
-        // best-effort
+      if (forEveryone) {
+        try {
+          await _session.endCallForEveryone(call);
+        } catch (_) {
+          // Two distinct failure modes for `Call.end()`:
+          //   1. Invalid status (e.g. fastReconnecting): SDK rejects
+          //      BEFORE running its internal local leave. Fallback below
+          //      is required — it's the only way the local user exits.
+          //   2. Permission denied / HTTP failure: SDK already ran the
+          //      local leave side-effect before the throw. Fallback is a
+          //      redundant no-op (harmless — `Call.leave()` is idempotent).
+          // We can't distinguish the modes from here; always run the
+          // fallback so the local user is always out of the call.
+          try {
+            await _session.leaveCall(call);
+          } catch (_) {
+            // best-effort
+          }
+        }
+      } else {
+        try {
+          await _session.leaveCall(call);
+        } catch (_) {
+          // best-effort
+        }
       }
     }
-    await _session.dispose();
+    try {
+      await _session.dispose();
+    } catch (_) {
+      // best-effort — never let teardown errors bubble up to callers.
+      // Apps should be able to call endCall without wrapping in try/catch.
+    }
     _state = ActiveCallState.idle;
     notifyListeners();
   }
