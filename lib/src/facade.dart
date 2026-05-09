@@ -77,6 +77,7 @@ class OitVideoCall {
     required VideoUser user,
     required TokenProvider tokenProvider,
   }) {
+    final old = _controller;
     _config = OitVideoCallConfig(
       apiKey: apiKey,
       user: user,
@@ -84,6 +85,11 @@ class OitVideoCall {
     );
     _controller = ActiveCallController();
     activeControllerListenable.value = _controller;
+    // Synchronously cancel the prior controller's `_callStateSub` and clear
+    // the SDK singleton so the new controller's `connectAndJoin` doesn't
+    // race Stream's "singleton already initialised" check. Network leave
+    // runs as fire-and-forget. See [ActiveCallController.cleanupForReinit].
+    if (old != null) old.cleanupForReinit();
   }
 
   /// Test-only setup that lets host-widget tests bring their own
@@ -96,9 +102,13 @@ class OitVideoCall {
     required OitVideoCallConfig config,
     required ActiveCallController controller,
   }) {
+    final old = _controller;
     _config = config;
     _controller = controller;
     activeControllerListenable.value = _controller;
+    // Same cleanup as [init] — drop the previous controller's subscription
+    // and SDK session synchronously before we let it go out of scope.
+    if (old != null) old.cleanupForReinit();
   }
 
   static Future<void> reset() async {

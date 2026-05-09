@@ -416,6 +416,48 @@ class ActiveCallController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Synchronous teardown for the "facade is being re-initialized" path.
+  ///
+  /// Cancels [_callStateSub], sets state to idle, kicks off network leave
+  /// + SDK dispose as fire-and-forget — all before returning. The
+  /// synchronous side-effect of `_session.dispose()` is
+  /// `StreamVideo.reset()`, whose `_instanceHolder.reset()` clears the
+  /// SDK's internal `_instance` field synchronously (verified by reading
+  /// `stream_video-1.3.2/lib/src/internal/_instance_holder.dart:54`). So
+  /// even though we don't `await` the returned `Future`, the singleton is
+  /// null'd before the call returns and a subsequent `StreamVideo(...)`
+  /// install (from a freshly-installed controller's `connectAndJoin`)
+  /// succeeds without hitting Stream's "singleton already initialised"
+  /// exception.
+  ///
+  /// Network-side leave runs in the background. If the SFU session was
+  /// already torn down by the synchronous dispose (likely), `leaveCall`
+  /// fails silently — Stream's coordinator GCs the participant entry on
+  /// heartbeat timeout (~30-60s), so we don't lose anything important by
+  /// not waiting for the leave to confirm.
+  ///
+  /// Used by [OitVideoCall.init] / [OitVideoCall.initForTest] so apps can
+  /// keep calling the sync `init(...)` API without `await`ing — and
+  /// without leaking the prior controller's `_callStateSub` + SDK session.
+  /// Production code that wants to fully await the SDK teardown (e.g.
+  /// during sign-out) should use [endCall] instead.
+  void cleanupForReinit() {
+    if (_state.mode == ActiveCallMode.idle) return;
+    _connectEpoch++;
+    final sub = _callStateSub;
+    _callStateSub = null;
+    if (sub != null) unawaited(sub.cancel());
+    final call = _state.call;
+    _state = ActiveCallState.idle;
+    notifyListeners();
+    if (call != null) {
+      // Best-effort network leave. Errors swallowed — see method dartdoc.
+      unawaited(_session.leaveCall(call).catchError((_) {}));
+    }
+    // Synchronously clears the SDK singleton (sync prefix of `dispose`).
+    unawaited(_session.dispose().catchError((_) {}));
+  }
+
   /// Synchronous reset — used in tests and during host-app sign-out where
   /// no live `Call` exists, and to allow [connectAndJoin] to be retried
   /// after a [ConnectErrored] result. Production code that has a live call
