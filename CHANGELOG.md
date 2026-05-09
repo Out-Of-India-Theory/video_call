@@ -13,6 +13,16 @@
   now re-mounts those platform views (sized + hidden behind the app
   for iOS, listener-only for Android) whenever the controller is
   `minimized` and has a live `Call`, so OS PiP works in both states.
+- **fix (Android)**: `StreamPictureInPictureAndroidView` is now wrapped
+  in a screen-sized `Overlay` when mounted by the host. The host sits
+  above `MaterialApp`'s navigator (no `Overlay` ancestor reachable),
+  and Stream's view calls `Overlay.of(context).insert(...)` when the OS
+  triggers PiP — without the wrapper that throws "No Overlay widget
+  found in context" the moment the user backgrounds the app from the
+  mini view.
+- Two new widget tests cover the host's build-branch shape: returns the
+  child directly when not minimized, returns just `FloatingViewContainer`
+  when minimized but no live call.
 
 ## 1.3.0
 

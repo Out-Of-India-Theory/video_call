@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:oit_video_call/oit_video_call.dart';
 import 'package:oit_video_call/src/config.dart';
+import 'package:stream_video_flutter/stream_video_flutter.dart';
 
 import '../screen/fake_call_session.dart';
 
@@ -359,6 +360,68 @@ void main() {
           reason: 'call must stay alive — silently ending without '
               'confirmation is worse than the user re-tapping later');
       expect(session.disposeCount, 0);
+    },
+  );
+
+  // -------------------------------------------------------------------
+  // Build-branch regression tests for the v1.3.1 OS-PiP-while-minimized
+  // fix. The host's build returns three different shapes depending on
+  // `(_isMinimized, state.call)`. Locks each branch in so a future
+  // change can't accidentally invert the gate or skip the early
+  // returns.
+  // -------------------------------------------------------------------
+
+  testWidgets(
+    'host returns child directly when not minimized (no Stack, no platform views)',
+    (tester) async {
+      // Idle controller — host's `_isMinimized` stays false.
+      final controller = ActiveCallController(session: FakeCallSession());
+      addTearDown(controller.dispose);
+      OitVideoCall.initForTest(config: _config(), controller: controller);
+
+      const homeKey = ValueKey<String>('home');
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: SizedBox.expand(key: homeKey),
+        ),
+      );
+
+      // Wrap the host AFTER the inner widget is in scope so the test can
+      // identify the host's child via key. Easier approach: inline.
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: OitVideoCallHost(child: SizedBox.expand(key: homeKey)),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.byKey(homeKey), findsOneWidget);
+      expect(find.byType(FloatingViewContainer), findsNothing);
+      expect(find.byType(StreamPictureInPictureAndroidView), findsNothing);
+      expect(find.byType(StreamPictureInPictureUiKitView), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'host returns floatingContainer (no platform views) when minimized but no live Call',
+    (tester) async {
+      final session = FakeCallSession();
+      _setupSingletonInMinimized(session: session);
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: OitVideoCallHost(child: SizedBox.expand()),
+        ),
+      );
+      await tester.pump();
+
+      // FloatingViewContainer IS rendered (mini overlay is on screen).
+      expect(find.byType(FloatingViewContainer), findsOneWidget);
+      // But the platform PiP source views are NOT — they require a live
+      // `Call`, which `forceMinimizedForTest` deliberately omits to keep
+      // the existing widget tests free of platform-channel mocking.
+      expect(find.byType(StreamPictureInPictureAndroidView), findsNothing);
+      expect(find.byType(StreamPictureInPictureUiKitView), findsNothing);
     },
   );
 }

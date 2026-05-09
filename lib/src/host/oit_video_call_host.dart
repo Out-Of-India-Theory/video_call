@@ -187,14 +187,27 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
           ),
         // The app + the floating mini, covering the entire host area.
         Positioned.fill(child: floatingContainer),
-        // Android: a listener-only widget that builds `SizedBox.shrink`.
-        // Drives the system PiP overlay via `AndroidPipManager`. Stacked
-        // above the app so its `Overlay`-injected PiP UI lands on top
-        // when the OS triggers PiP.
+        // Android: a listener-only widget that calls
+        // `Overlay.of(context).insert(...)` when the OS triggers PiP. The
+        // host sits above `MaterialApp`'s navigator (which owns the
+        // navigator's Overlay), so a bare `StreamPictureInPictureAndroidView`
+        // here has no `Overlay` ancestor and crashes with "No Overlay
+        // widget found in context" the moment OS PiP fires. Wrap it in
+        // a screen-sized `Overlay` so its own `Overlay.of(context)` call
+        // resolves to this overlay; the SDK's PiP overlay entry then
+        // inserts here and renders full-screen for the OS to capture.
         if (CurrentPlatform.isAndroid)
-          StreamPictureInPictureAndroidView(
-            call: call,
-            configuration: pipConfig,
+          Positioned.fill(
+            child: Overlay(
+              initialEntries: [
+                OverlayEntry(
+                  builder: (_) => StreamPictureInPictureAndroidView(
+                    call: call,
+                    configuration: pipConfig,
+                  ),
+                ),
+              ],
+            ),
           ),
       ],
     );
