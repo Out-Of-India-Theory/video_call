@@ -34,9 +34,11 @@ CallParticipantState? pickMinimizedParticipant(
 /// by [OitVideoCallHost] when the active call is minimized.
 ///
 /// Drag + corner-snap is provided by the surrounding [FloatingViewContainer];
-/// this widget renders only the inner card content (120x160dp dark Material
-/// card with rounded corners). The participant rendered in the tile is chosen
-/// by [pickMinimizedParticipant] — see its dartdoc for the precedence rules.
+/// this widget renders only the inner card content — a dark Material card
+/// with rounded corners, sized to [width] × [height] (the single source of
+/// truth that the host also passes into the floating container). The
+/// participant rendered in the tile is chosen by [pickMinimizedParticipant]
+/// — see its dartdoc for the precedence rules.
 ///
 /// "Connecting…" only shows if the participant list is empty (call object
 /// not yet built, or every participant left). Bottom strip exposes three
