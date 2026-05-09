@@ -2,10 +2,10 @@
 
 ## 1.3.5
 
-- **chore (UX)**: revert the v1.3.4 mini bump on Android. iOS keeps the
-  larger 180×240 tile (system-PiP feel — iOS FaceTime's medium tile is
-  ~200×356), Android goes back to the original 120×160 to preserve
-  existing layouts. `MinimizedCallView.width` / `MinimizedCallView.height`
+- **chore (UX)**: split mini size by platform. iOS now 170×230 (trimmed
+  ~10dp off the v1.3.4 180×240 — still noticeably larger than the
+  baseline, no longer feels oversized), Android reverts to the original
+  120×160. `MinimizedCallView.width` / `MinimizedCallView.height`
   switched from `static const` to platform-aware `static get` returning
   the per-OS value at runtime — `const` was incompatible with the
   branch. No API change for callers (they were already reading via the
