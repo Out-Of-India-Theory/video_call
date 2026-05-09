@@ -11,10 +11,25 @@
   `setPictureInPictureAllowed(false)` AFTER our newly-mounted host view's
   init-time `(true)`. The native flag ended up `false` and
   `PictureInPictureHelper.handlePipTrigger` short-circuited on the next
-  background. Host now schedules a 500ms-delayed re-assert of
-  `setPictureInPictureAllowed(true)` whenever it transitions to
-  minimized, so our value lands LAST regardless of when the full-screen
-  view's dispose fires.
+  background. Host now chains four re-asserts of
+  `setPictureInPictureAllowed(...)` after every minimize transition (at
+  +100ms, +250ms, +500ms, +1000ms relative to the prior fire — cumulative
+  ~100/350/850/1850ms from minimize) so that whichever fire-time lands
+  LAST after View_A's dispose wins. Closes the 300–500ms vulnerability
+  window left by the original single 500ms timer and survives apps with
+  custom `PageTransitionsTheme` / `PageRouteBuilder` durations up to ~1s.
+  Each tick honors Stream's screen-share gate by reading
+  `localParticipant?.isScreenShareEnabled` and re-asserting `false` while
+  screen-sharing — mirroring `StreamPictureInPictureAndroidView`'s
+  internal `_shouldAllowPictureInPicture` so the timer doesn't paint over
+  the SDK's intent. New widget tests in `oit_video_call_host_test.dart`
+  lock in the three race-prevention invariants: schedules on minimize
+  transition, cancels on host dispose, no-ops on mode flip-back. Tests
+  use a new `OitVideoCallHost.debugSetPictureInPictureAllowedOverride`
+  test seam that bypasses `CurrentPlatform.isAndroid` (which reads
+  `dart:io`'s `Platform` and is non-overridable) and the
+  `stream_video_flutter_android_pip` method channel. Production paths
+  unaffected when the override is null (the default).
 
 ## 1.3.2
 

@@ -424,4 +424,157 @@ void main() {
       expect(find.byType(StreamPictureInPictureUiKitView), findsNothing);
     },
   );
+
+  // -------------------------------------------------------------------
+  // Android PiP re-assert timer behavior (v1.3.3 chained checkpoints).
+  //
+  // The host schedules a chain of `setPictureInPictureAllowed(true)`
+  // calls at 100, 250, 500, 1000 ms after a minimize transition to
+  // outlast the full-screen `StreamPictureInPictureAndroidView`'s
+  // dispose-time `(false)` regardless of the route's transition
+  // duration. Three invariants must hold:
+  //
+  //   1. Schedules on minimize transition (with valid preconditions)
+  //   2. Cancels on host dispose
+  //   3. Cancels (or no-ops) when mode flips back to connected
+  //
+  // The test seam is `OitVideoCallHost.debugSetPictureInPictureAllowedOverride`
+  // — when set it (a) replaces the platform-channel call with the
+  // override, (b) flips the platform / live-call gate so the chain runs
+  // on a non-Android test host without a real `Call`. See its dartdoc on
+  // [OitVideoCallHost] for details.
+  // -------------------------------------------------------------------
+
+  group('Android PiP re-assert timer', () {
+    late List<bool> setAllowedCalls;
+
+    setUp(() {
+      setAllowedCalls = <bool>[];
+      OitVideoCallHost.debugSetPictureInPictureAllowedOverride =
+          setAllowedCalls.add;
+    });
+
+    tearDown(() {
+      OitVideoCallHost.debugSetPictureInPictureAllowedOverride = null;
+    });
+
+    testWidgets(
+      'fires the four-checkpoint chain on minimize transition',
+      (tester) async {
+        final session = FakeCallSession();
+        final controller = ActiveCallController(session: session);
+        OitVideoCall.initForTest(config: _config(), controller: controller);
+
+        await tester.pumpWidget(
+          const MaterialApp(
+            home: OitVideoCallHost(child: SizedBox.expand()),
+          ),
+        );
+        await tester.pump();
+        // No transition yet — chain must not have fired.
+        expect(setAllowedCalls, isEmpty);
+
+        // Drive the controller through a minimize transition. The host
+        // listens via `_onChange` and schedules the chain on the false→true
+        // edge of `_isMinimized`.
+        controller.forceMinimizedForTest(callId: 'c1', callType: 'default');
+        await tester.pump(); // let the listener run
+
+        // The chain is SEQUENTIAL: each tick schedules the next with
+        // `Duration(milliseconds: checkpoints[i])` measured from the
+        // current tick's fire time, not from the minimize event. So
+        // cumulative fire times for `[100, 250, 500, 1000]` are
+        // 100, 350, 850, 1850 ms — spread the chain across a wider
+        // window than absolute-from-minimize checkpoints would.
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(setAllowedCalls, [true]);
+        await tester.pump(const Duration(milliseconds: 250));
+        expect(setAllowedCalls, [true, true]);
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(setAllowedCalls, [true, true, true]);
+        await tester.pump(const Duration(milliseconds: 1000));
+        expect(setAllowedCalls, [true, true, true, true]);
+
+        // Chain has fully drained — advancing further must not produce
+        // any additional fires (the inner `scheduleNext()` returns once
+        // `i >= checkpoints.length`).
+        await tester.pump(const Duration(seconds: 2));
+        expect(setAllowedCalls.length, 4);
+      },
+    );
+
+    testWidgets(
+      'cancels pending fires on host dispose',
+      (tester) async {
+        final session = FakeCallSession();
+        final controller = ActiveCallController(session: session);
+        OitVideoCall.initForTest(config: _config(), controller: controller);
+
+        await tester.pumpWidget(
+          const MaterialApp(
+            home: OitVideoCallHost(child: SizedBox.expand()),
+          ),
+        );
+        await tester.pump();
+
+        controller.forceMinimizedForTest(callId: 'c1', callType: 'default');
+        await tester.pump();
+        // Fire the first two checkpoints (cumulative 100ms then 350ms).
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump(const Duration(milliseconds: 250));
+        expect(setAllowedCalls.length, 2);
+
+        // Dispose the host by replacing the widget tree. The State's
+        // `dispose` method calls `_pipReassertTimer?.cancel()` — any
+        // remaining fires (500ms, 1000ms intervals after the second)
+        // must NOT happen.
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump(const Duration(seconds: 2));
+        expect(
+          setAllowedCalls.length,
+          2,
+          reason: 'pending checkpoints must not fire after the host is '
+              'disposed — otherwise the cleanup path from PR #12 '
+              '(cleanupForReinit) could collide with a queued tick',
+        );
+      },
+    );
+
+    testWidgets(
+      'no-ops the remaining chain when mode flips back to connected',
+      (tester) async {
+        final session = FakeCallSession();
+        final controller = ActiveCallController(session: session);
+        OitVideoCall.initForTest(config: _config(), controller: controller);
+
+        await tester.pumpWidget(
+          const MaterialApp(
+            home: OitVideoCallHost(child: SizedBox.expand()),
+          ),
+        );
+        await tester.pump();
+
+        controller.forceMinimizedForTest(callId: 'c1', callType: 'default');
+        await tester.pump();
+        // Fire the first checkpoint.
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(setAllowedCalls, [true]);
+
+        // User taps the mini → full-screen within the chain window. The
+        // controller flips out of `minimized`; subsequent fires must
+        // bail at the `mode != minimized` guard and stop chaining.
+        controller.expand();
+        final beforeExpand = setAllowedCalls.length;
+        await tester.pump(const Duration(seconds: 2));
+        expect(
+          setAllowedCalls.length,
+          beforeExpand,
+          reason: 'once mode flips back to connected, the inner timer '
+              'callback must hit the `mode != minimized` guard, skip '
+              'the platform-channel call, and skip `scheduleNext()` so '
+              'the chain stays broken',
+        );
+      },
+    );
+  });
 }
