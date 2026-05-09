@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
 
@@ -62,6 +64,24 @@ class OitVideoCallHost extends StatefulWidget {
   /// multi-`MaterialApp` / add-to-app / shell-embedded apps.
   final GlobalKey<NavigatorState>? navigatorKey;
 
+  /// Test-only override that replaces the call to
+  /// `AndroidPipManager.instance().setPictureInPictureAllowed(...)` made by
+  /// the chained re-assert timer (see
+  /// [_OitVideoCallHostState._scheduleAndroidPipReassert]).
+  ///
+  /// Setting this also flips the platform / live-call gate that ordinarily
+  /// guards the scheduler so widget tests can drive the timer chain on a
+  /// test host (Mac/Linux/iOS CI) without standing up a real Stream
+  /// [Call] or hitting the `stream_video_flutter_android_pip` method
+  /// channel — both of which short-circuit on non-Android via
+  /// `CurrentPlatform.isAndroid` reads against `dart:io`'s `Platform`.
+  ///
+  /// Production code paths are unaffected when this is `null` (the
+  /// default). Tests that assign a value MUST clear it in `tearDown`
+  /// otherwise subsequent tests will inherit the override.
+  @visibleForTesting
+  static void Function(bool allowed)? debugSetPictureInPictureAllowedOverride;
+
   @override
   State<OitVideoCallHost> createState() => _OitVideoCallHostState();
 }
@@ -75,6 +95,10 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
   /// whose build output didn't actually change.
   bool _isMinimized = false;
 
+  /// Pending re-assertion of `setPictureInPictureAllowed(true)` — see
+  /// [_scheduleAndroidPipReassert] for the race it papers over.
+  Timer? _pipReassertTimer;
+
   @override
   void initState() {
     super.initState();
@@ -86,6 +110,7 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
   void dispose() {
     OitVideoCall.activeControllerListenable.removeListener(_onActiveControllerChanged);
     _controller?.removeListener(_onChange);
+    _pipReassertTimer?.cancel();
     super.dispose();
   }
 
@@ -115,6 +140,103 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
     final next = _controller?.state.mode == ActiveCallMode.minimized;
     if (next != _isMinimized) {
       setState(() => _isMinimized = next);
+      if (next && _shouldScheduleAndroidPipReassert()) {
+        _scheduleAndroidPipReassert();
+      }
+    }
+  }
+
+  /// Production path: only schedule on Android with a live `Call`.
+  /// Test path: when [OitVideoCallHost.debugSetPictureInPictureAllowedOverride]
+  /// is set, schedule unconditionally so the chain can be exercised on a
+  /// non-Android host without a real `Call`. See the override's dartdoc for
+  /// why neither gate is bypassable in a test environment without this.
+  bool _shouldScheduleAndroidPipReassert() {
+    if (OitVideoCallHost.debugSetPictureInPictureAllowedOverride != null) {
+      return true;
+    }
+    return _controller?.state.call != null && CurrentPlatform.isAndroid;
+  }
+
+  /// Workaround for a Stream-SDK race that breaks OS-level PiP after the
+  /// in-app PiP transition.
+  ///
+  /// Sequence: user is in the full-screen call route (which mounts its own
+  /// `StreamPictureInPictureAndroidView` inside `StreamCallContainer`).
+  /// They press back → `minimize()` flips the controller mode →
+  /// `_triggerPop` schedules `Navigator.pop`. The route's pop animation
+  /// runs ~300ms before `CallScreen.dispose` actually fires; only THEN
+  /// does the SDK's view dispose, calling
+  /// `AndroidPipManager.setPictureInPictureAllowed(false)`. By that time
+  /// the host's *new* (minimized-state) `StreamPictureInPictureAndroidView`
+  /// has already mounted and called `setPictureInPictureAllowed(true)`
+  /// from its initState. The late dispose-set-false races AFTER the
+  /// init-set-true and wins, leaving the native flag at `false` — so when
+  /// the user backgrounds the app from the mini,
+  /// `PictureInPictureHelper.handlePipTrigger` sees the flag as false and
+  /// doesn't call `enterPictureInPictureMode`.
+  ///
+  /// We can't predict exactly when the dispose fires (Material's default
+  /// is ~300ms but apps with custom `PageTransitionsTheme` /
+  /// `PageRouteBuilder` can push it well past 500ms), so a single fixed
+  /// delay leaves both a vulnerability window (300–delay ms) AND a
+  /// fragility cliff (custom transitions > delay). Sweep across plausible
+  /// transition durations instead — whichever fire-time lands LAST after
+  /// View_A's dispose wins. Cost is 4 platform-channel hits per minimize
+  /// transition, each roughly free.
+  ///
+  /// Honors Stream's screen-share gate: when the local participant is
+  /// screen-sharing AND the active configuration disables PiP during
+  /// screen-share, we re-assert `false` so the timer doesn't paint over
+  /// the SDK's intended behavior. Today the host hardcodes
+  /// `disablePictureInPictureWhenScreenSharing: false` (matching what
+  /// `CallScreen` passes to `StreamCallContainer`), but the read is in
+  /// place for when that becomes configurable.
+  void _scheduleAndroidPipReassert() {
+    _pipReassertTimer?.cancel();
+    const checkpoints = <int>[100, 250, 500, 1000];
+    var i = 0;
+    void scheduleNext() {
+      if (i >= checkpoints.length) return;
+      _pipReassertTimer = Timer(
+        Duration(milliseconds: checkpoints[i]),
+        () {
+          i++;
+          if (!mounted) return;
+          final controller = _controller;
+          if (controller?.state.mode != ActiveCallMode.minimized) return;
+          final call = controller?.state.call;
+          final override =
+              OitVideoCallHost.debugSetPictureInPictureAllowedOverride;
+          if (call == null && override == null) return;
+          // Read screen-share state synchronously. Stream's view bails to
+          // `setPictureInPictureAllowed(false)` here when its config has
+          // `disablePictureInPictureWhenScreenSharing: true`; mirror the
+          // same gate so we don't override the SDK's intent.
+          final isScreenSharing = call
+                  ?.state.value.localParticipant?.isScreenShareEnabled ??
+              false;
+          _setPictureInPictureAllowed(!isScreenSharing);
+          scheduleNext();
+        },
+      );
+    }
+
+    scheduleNext();
+  }
+
+  /// Production path forwards to Stream's `AndroidPipManager`. Test path
+  /// (when [OitVideoCallHost.debugSetPictureInPictureAllowedOverride] is
+  /// non-null) hands the value to the override instead, bypassing the
+  /// `stream_video_flutter_android_pip` method channel entirely. See the
+  /// override's dartdoc.
+  void _setPictureInPictureAllowed(bool allowed) {
+    final override =
+        OitVideoCallHost.debugSetPictureInPictureAllowedOverride;
+    if (override != null) {
+      override(allowed);
+    } else {
+      AndroidPipManager.instance().setPictureInPictureAllowed(allowed);
     }
   }
 
