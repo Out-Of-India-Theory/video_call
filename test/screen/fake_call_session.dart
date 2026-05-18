@@ -58,6 +58,15 @@ class FakeCallSession implements CallSession {
     call.stateNotifier.value = current.copyWith(status: status);
   }
 
+  /// Pushes a synthetic [CallState] update that swaps the participant list.
+  /// Used by call-screen tests to drive the waiting-banner gate.
+  void pushParticipants(List<CallParticipantState> participants) {
+    final call = _call;
+    if (call == null) return;
+    final current = call.state.value;
+    call.stateNotifier.value = current.copyWith(callParticipants: participants);
+  }
+
   @override
   Future<void> connect({
     required String apiKey,
@@ -216,4 +225,22 @@ class _FakeStateEmitter<T> extends MutableStateEmitter<T> {
     required Duration timeLimit,
   }) =>
       _ctrl.stream.firstWhere(test, orElse: orElse).timeout(timeLimit);
+}
+
+/// Minimal [CallParticipantState] builder for waiting-banner tests. Fills only
+/// the required positional/keyword fields of the SDK constructor — the gate
+/// predicate reads `isLocal`, nothing else.
+CallParticipantState fakeParticipant({
+  required bool isLocal,
+  String userId = 'p',
+}) {
+  return CallParticipantState(
+    userId: userId,
+    roles: const ['user'],
+    name: userId,
+    custom: const {},
+    sessionId: 's-$userId',
+    trackIdPrefix: 't-$userId',
+    isLocal: isLocal,
+  );
 }

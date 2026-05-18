@@ -577,4 +577,125 @@ void main() {
       await tester.pump(const Duration(milliseconds: 10));
     }
   });
+
+  // -----------------------------------------------------------------
+  // Waiting-for-other-participant banner.
+  // -----------------------------------------------------------------
+
+  testWidgets('waiting banner shows when local is alone', (tester) async {
+    final session = FakeCallSession();
+    final gate = FakePermissionGate();
+    _swallowRenderPhaseMockErrors();
+
+    await tester.pumpWidget(MaterialApp(
+      home: CallScreen(
+        config: _config(),
+        controller: ActiveCallController(session: session),
+        callId: 'c1',
+        callType: 'default',
+        audioOnly: false,
+        waitingForOtherParticipant: const Text('WAITING'),
+        deps: CallScreenDeps(permissionGate: gate),
+      ),
+    ));
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    // Local-only participant list (the `_FakeCall` initial state has empty
+    // participants — equivalent to "alone").
+    session.pushParticipants([fakeParticipant(isLocal: true, userId: 'me')]);
+    await tester.pump();
+
+    expect(find.text('WAITING'), findsOneWidget);
+  });
+
+  testWidgets('waiting banner disappears when remote joins', (tester) async {
+    final session = FakeCallSession();
+    final gate = FakePermissionGate();
+    _swallowRenderPhaseMockErrors();
+
+    await tester.pumpWidget(MaterialApp(
+      home: CallScreen(
+        config: _config(),
+        controller: ActiveCallController(session: session),
+        callId: 'c1',
+        callType: 'default',
+        audioOnly: false,
+        waitingForOtherParticipant: const Text('WAITING'),
+        deps: CallScreenDeps(permissionGate: gate),
+      ),
+    ));
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    session.pushParticipants([fakeParticipant(isLocal: true, userId: 'me')]);
+    await tester.pump();
+    expect(find.text('WAITING'), findsOneWidget);
+
+    session.pushParticipants([
+      fakeParticipant(isLocal: true, userId: 'me'),
+      fakeParticipant(isLocal: false, userId: 'them'),
+    ]);
+    await tester.pump();
+    expect(find.text('WAITING'), findsNothing);
+  });
+
+  testWidgets('waiting banner stays hidden after remote drops (latch)', (tester) async {
+    final session = FakeCallSession();
+    final gate = FakePermissionGate();
+    _swallowRenderPhaseMockErrors();
+
+    await tester.pumpWidget(MaterialApp(
+      home: CallScreen(
+        config: _config(),
+        controller: ActiveCallController(session: session),
+        callId: 'c1',
+        callType: 'default',
+        audioOnly: false,
+        waitingForOtherParticipant: const Text('WAITING'),
+        deps: CallScreenDeps(permissionGate: gate),
+      ),
+    ));
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    // Remote joins, then drops.
+    session.pushParticipants([
+      fakeParticipant(isLocal: true, userId: 'me'),
+      fakeParticipant(isLocal: false, userId: 'them'),
+    ]);
+    await tester.pump();
+    session.pushParticipants([fakeParticipant(isLocal: true, userId: 'me')]);
+    await tester.pump();
+
+    expect(find.text('WAITING'), findsNothing);
+  });
+
+  testWidgets('no banner when waitingForOtherParticipant param is null', (tester) async {
+    final session = FakeCallSession();
+    final gate = FakePermissionGate();
+    _swallowRenderPhaseMockErrors();
+
+    await tester.pumpWidget(MaterialApp(
+      home: CallScreen(
+        config: _config(),
+        controller: ActiveCallController(session: session),
+        callId: 'c1',
+        callType: 'default',
+        audioOnly: false,
+        // waitingForOtherParticipant intentionally omitted.
+        deps: CallScreenDeps(permissionGate: gate),
+      ),
+    ));
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    session.pushParticipants([fakeParticipant(isLocal: true, userId: 'me')]);
+    await tester.pump();
+
+    expect(find.text('WAITING'), findsNothing);
+  });
 }
