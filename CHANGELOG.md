@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.0
+
+- Add `waitingForOtherParticipant` to `OitVideoCall.callScreen(...)` — host apps can supply a custom widget rendered over the call screen while the local user is the only participant. Latches off the first time a remote joins.
+
 ## 1.3.5
 
 - **chore (UX)**: split mini size by platform. iOS now 170×230 (trimmed
