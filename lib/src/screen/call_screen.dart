@@ -10,6 +10,7 @@ import '../config.dart';
 import '../errors.dart';
 import 'error_view.dart';
 import 'permission_gate.dart';
+import 'waiting_banner_gate.dart';
 
 @visibleForTesting
 class CallScreenDeps {
@@ -314,22 +315,15 @@ class _CallScreenState extends State<CallScreen> {
           ),
         _Ready(call: final call) => Stack(
           children: [
-            // The Builder is a deliberate error boundary: if
-            // [StreamCallContainer] throws synchronously during build
-            // (e.g. because a mocked Call returns null for a stream getter
-            // in widget tests), the failure is contained to this slot and
-            // the sibling banner still mounts. In production it's a no-op.
-            Builder(
-              builder: (_) => StreamCallContainer(
-                call: call,
-                pictureInPictureConfiguration:
-                    const PictureInPictureConfiguration(
-                  enablePictureInPicture: true,
-                ),
-                onBackPressed: _onBackPressed,
-                onLeaveCallTap: () => unawaited(_onLeaveCallTap()),
-                onCallDisconnected: _onCallDisconnected,
+            StreamCallContainer(
+              call: call,
+              pictureInPictureConfiguration:
+                  const PictureInPictureConfiguration(
+                enablePictureInPicture: true,
               ),
+              onBackPressed: _onBackPressed,
+              onLeaveCallTap: () => unawaited(_onLeaveCallTap()),
+              onCallDisconnected: _onCallDisconnected,
             ),
             if (widget.waitingForOtherParticipant != null)
               Positioned(
@@ -338,7 +332,7 @@ class _CallScreenState extends State<CallScreen> {
                 right: 0,
                 child: SafeArea(
                   bottom: false,
-                  child: _WaitingBannerGate(
+                  child: WaitingBannerGate(
                     call: call,
                     child: widget.waitingForOtherParticipant!,
                   ),
@@ -359,60 +353,5 @@ class _CallScreenState extends State<CallScreen> {
     _controller.reset();
     setState(() => _phase = _Loading());
     _start();
-  }
-}
-
-/// Subscribes to [Call.state] and shows [child] only while the local user is
-/// the sole participant. Latches "hide" the first time a remote joins — the
-/// banner does not reappear if the remote drops mid-call.
-class _WaitingBannerGate extends StatefulWidget {
-  const _WaitingBannerGate({required this.call, required this.child});
-
-  final Call call;
-  final Widget child;
-
-  @override
-  State<_WaitingBannerGate> createState() => _WaitingBannerGateState();
-}
-
-class _WaitingBannerGateState extends State<_WaitingBannerGate> {
-  bool _latched = false;
-  StreamSubscription<CallState>? _sub;
-
-  @override
-  void initState() {
-    super.initState();
-    // Synchronously inspect the current state so re-expanding into an
-    // already-joined call doesn't flash the banner for a frame.
-    if (_hasRemote(widget.call.state.value)) {
-      _latched = true;
-    }
-    _sub = widget.call.state.listen(_onState);
-  }
-
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
-  }
-
-  void _onState(CallState state) {
-    if (_latched) return;
-    if (_hasRemote(state)) {
-      setState(() => _latched = true);
-    } else {
-      // Force a rebuild so the child appears when the participant list
-      // transitions from empty to local-only (initial connect ordering).
-      setState(() {});
-    }
-  }
-
-  bool _hasRemote(CallState state) =>
-      state.callParticipants.any((p) => !p.isLocal);
-
-  @override
-  Widget build(BuildContext context) {
-    if (_latched) return const SizedBox.shrink();
-    return widget.child;
   }
 }

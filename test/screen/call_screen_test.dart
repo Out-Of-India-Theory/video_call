@@ -8,6 +8,7 @@ import 'package:oit_video_call/src/config.dart';
 import 'package:oit_video_call/src/models/video_user.dart';
 import 'package:oit_video_call/src/screen/call_screen.dart';
 import 'package:oit_video_call/src/screen/permission_gate.dart';
+import 'package:oit_video_call/src/screen/waiting_banner_gate.dart';
 
 import 'fake_call_session.dart';
 import 'fake_permission_gate.dart';
@@ -579,123 +580,22 @@ void main() {
   });
 
   // -----------------------------------------------------------------
-  // Waiting-for-other-participant banner.
+  // Waiting-for-other-participant banner: gate-level behavior lives in
+  // `waiting_banner_gate_test.dart`. Here we keep one regression test that
+  // proves CallScreen does not mount a gate at all when the param is null.
   // -----------------------------------------------------------------
 
-  testWidgets('waiting banner shows when local is alone', (tester) async {
+  testWidgets('CallScreen does not mount a banner when waitingForOtherParticipant is null', (tester) async {
     final session = FakeCallSession();
     final gate = FakePermissionGate();
     _swallowRenderPhaseMockErrors();
 
-    await tester.pumpWidget(MaterialApp(
-      home: CallScreen(
-        config: _config(),
-        controller: ActiveCallController(session: session),
-        callId: 'c1',
-        callType: 'default',
-        audioOnly: false,
-        waitingForOtherParticipant: const Text('WAITING'),
-        deps: CallScreenDeps(permissionGate: gate),
-      ),
-    ));
+    final hosted = _host(config: _config(), session: session, gate: gate);
+    await tester.pumpWidget(hosted.widget);
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 10));
     }
 
-    // Local-only participant list (the `_FakeCall` initial state has empty
-    // participants — equivalent to "alone").
-    session.pushParticipants([fakeParticipant(isLocal: true, userId: 'me')]);
-    await tester.pump();
-
-    expect(find.text('WAITING'), findsOneWidget);
-  });
-
-  testWidgets('waiting banner disappears when remote joins', (tester) async {
-    final session = FakeCallSession();
-    final gate = FakePermissionGate();
-    _swallowRenderPhaseMockErrors();
-
-    await tester.pumpWidget(MaterialApp(
-      home: CallScreen(
-        config: _config(),
-        controller: ActiveCallController(session: session),
-        callId: 'c1',
-        callType: 'default',
-        audioOnly: false,
-        waitingForOtherParticipant: const Text('WAITING'),
-        deps: CallScreenDeps(permissionGate: gate),
-      ),
-    ));
-    for (var i = 0; i < 20; i++) {
-      await tester.pump(const Duration(milliseconds: 10));
-    }
-
-    session.pushParticipants([fakeParticipant(isLocal: true, userId: 'me')]);
-    await tester.pump();
-    expect(find.text('WAITING'), findsOneWidget);
-
-    session.pushParticipants([
-      fakeParticipant(isLocal: true, userId: 'me'),
-      fakeParticipant(isLocal: false, userId: 'them'),
-    ]);
-    await tester.pump();
-    expect(find.text('WAITING'), findsNothing);
-  });
-
-  testWidgets('waiting banner stays hidden after remote drops (latch)', (tester) async {
-    final session = FakeCallSession();
-    final gate = FakePermissionGate();
-    _swallowRenderPhaseMockErrors();
-
-    await tester.pumpWidget(MaterialApp(
-      home: CallScreen(
-        config: _config(),
-        controller: ActiveCallController(session: session),
-        callId: 'c1',
-        callType: 'default',
-        audioOnly: false,
-        waitingForOtherParticipant: const Text('WAITING'),
-        deps: CallScreenDeps(permissionGate: gate),
-      ),
-    ));
-    for (var i = 0; i < 20; i++) {
-      await tester.pump(const Duration(milliseconds: 10));
-    }
-
-    // Remote joins, then drops.
-    session.pushParticipants([
-      fakeParticipant(isLocal: true, userId: 'me'),
-      fakeParticipant(isLocal: false, userId: 'them'),
-    ]);
-    await tester.pump();
-    session.pushParticipants([fakeParticipant(isLocal: true, userId: 'me')]);
-    await tester.pump();
-
-    expect(find.text('WAITING'), findsNothing);
-  });
-
-  testWidgets('no banner when waitingForOtherParticipant param is null', (tester) async {
-    final session = FakeCallSession();
-    final gate = FakePermissionGate();
-    _swallowRenderPhaseMockErrors();
-
-    await tester.pumpWidget(MaterialApp(
-      home: CallScreen(
-        config: _config(),
-        controller: ActiveCallController(session: session),
-        callId: 'c1',
-        callType: 'default',
-        audioOnly: false,
-        // waitingForOtherParticipant intentionally omitted.
-        deps: CallScreenDeps(permissionGate: gate),
-      ),
-    ));
-    for (var i = 0; i < 20; i++) {
-      await tester.pump(const Duration(milliseconds: 10));
-    }
-    session.pushParticipants([fakeParticipant(isLocal: true, userId: 'me')]);
-    await tester.pump();
-
-    expect(find.text('WAITING'), findsNothing);
+    expect(find.byType(WaitingBannerGate), findsNothing);
   });
 }
