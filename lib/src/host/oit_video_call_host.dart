@@ -395,6 +395,7 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
           createIfMissing: args.createIfMissing,
           onCallEnded: args.onCallEnded,
           confirmLeave: args.confirmLeave,
+          waitingForOtherParticipant: args.waitingForOtherParticipant,
         ),
       ),
     );

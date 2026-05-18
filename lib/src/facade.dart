@@ -23,6 +23,7 @@ class CallScreenArgs {
     required this.createIfMissing,
     required this.onCallEnded,
     required this.confirmLeave,
+    required this.waitingForOtherParticipant,
   });
 
   final String callId;
@@ -31,6 +32,7 @@ class CallScreenArgs {
   final bool createIfMissing;
   final VoidCallback? onCallEnded;
   final Future<bool> Function(BuildContext context)? confirmLeave;
+  final Widget? waitingForOtherParticipant;
 }
 
 class OitVideoCall {
@@ -142,6 +144,7 @@ class OitVideoCall {
     String callType = 'default',
     VoidCallback? onCallEnded,
     Future<bool> Function(BuildContext context)? confirmLeave,
+    Widget? waitingForOtherParticipant,
   }) {
     if (_config == null || _controller == null) {
       return const Scaffold(
@@ -162,6 +165,7 @@ class OitVideoCall {
       createIfMissing: createIfMissing,
       onCallEnded: onCallEnded,
       confirmLeave: confirmLeave,
+      waitingForOtherParticipant: waitingForOtherParticipant,
     );
     return CallScreen(
       config: _config!,
@@ -172,6 +176,7 @@ class OitVideoCall {
       createIfMissing: createIfMissing,
       onCallEnded: onCallEnded,
       confirmLeave: confirmLeave,
+      waitingForOtherParticipant: waitingForOtherParticipant,
     );
   }
 }

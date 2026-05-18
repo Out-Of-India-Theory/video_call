@@ -30,6 +30,7 @@ class CallScreen extends StatefulWidget {
     this.createIfMissing = false,
     this.onCallEnded,
     this.confirmLeave,
+    this.waitingForOtherParticipant,
     @visibleForTesting this.deps,
   });
 
@@ -52,6 +53,11 @@ class CallScreen extends StatefulWidget {
   /// apps wire this to whatever confirmation UI matches their design system
   /// (bottom sheet, dialog, etc.).
   final Future<bool> Function(BuildContext context)? confirmLeave;
+
+  /// Optional widget rendered over the call screen while the local user is
+  /// alone in the call (no remote participants yet). Wired in Task 2 — for
+  /// now this is plumbing only; the field is unused.
+  final Widget? waitingForOtherParticipant;
 
   @visibleForTesting
   final CallScreenDeps? deps;
