@@ -113,7 +113,8 @@ class ActiveCallController extends ChangeNotifier {
     final String token;
     try {
       token = await config.tokenProvider();
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('[oit_video_call] tokenProvider failed: $e\n$st');
       return ConnectErrored(
         OitVideoCallErrorCode.tokenFetchFailed,
         'Could not fetch call token.',
@@ -132,7 +133,8 @@ class ActiveCallController extends ChangeNotifier {
         image: config.user.image,
       );
       await _session.connect(apiKey: config.apiKey, user: user, token: token);
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('[oit_video_call] session.connect failed: $e\n$st');
       return ConnectErrored(
         OitVideoCallErrorCode.joinFailed,
         'Could not connect to call service.',
@@ -156,12 +158,17 @@ class ActiveCallController extends ChangeNotifier {
       call = createIfMissing
           ? await _session.getOrCreateCall(callType: callType, callId: callId)
           : await _session.getCall(callType: callType, callId: callId);
-    } on CallNotFoundError {
+    } on CallNotFoundError catch (e, st) {
+      debugPrint('[oit_video_call] getCall not found ($callType/$callId): $e\n$st');
       return ConnectErrored(
         OitVideoCallErrorCode.callNotFound,
         'Call not available.',
       );
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint(
+        '[oit_video_call] ${createIfMissing ? "getOrCreateCall" : "getCall"} '
+        'failed ($callType/$callId): $e\n$st',
+      );
       return ConnectErrored(
         OitVideoCallErrorCode.joinFailed,
         createIfMissing ? 'Could not start call.' : 'Could not load call.',
@@ -188,7 +195,8 @@ class ActiveCallController extends ChangeNotifier {
       if (audioOnly) {
         await _session.setCameraEnabled(call, false);
       }
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('[oit_video_call] joinCall failed ($callType/$callId): $e\n$st');
       // If `joinCall` succeeded but `setCameraEnabled` failed, the call is
       // fully joined and would otherwise be leaked (no `leaveCall`, no
       // `dispose`). Mirror the cancellation branches above with best-effort
