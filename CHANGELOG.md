@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.1
+
+- Fix: position the host-supplied waiting banner below Stream's `CallAppBar` so the back and disconnect controls remain accessible. Previously the banner sat flush with the status bar and overlapped the app bar.
+
 ## 1.4.0
 
 - Add `waitingForOtherParticipant` to `OitVideoCall.callScreen(...)` — host apps can supply a custom widget rendered over the call screen while the local user is the only participant. Latches off the first time a remote joins.
