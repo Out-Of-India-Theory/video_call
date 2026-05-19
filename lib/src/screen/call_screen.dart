@@ -325,17 +325,16 @@ class _CallScreenState extends State<CallScreen> {
               onLeaveCallTap: () => unawaited(_onLeaveCallTap()),
               onCallDisconnected: _onCallDisconnected,
             ),
+            // Offset by status bar + Material AppBar height so the banner sits just below
+            // Stream's CallAppBar instead of overlapping the back/leave controls.
             if (widget.waitingForOtherParticipant != null)
               Positioned(
-                top: 0,
+                top: MediaQuery.of(context).padding.top + kToolbarHeight,
                 left: 0,
                 right: 0,
-                child: SafeArea(
-                  bottom: false,
-                  child: WaitingBannerGate(
-                    call: call,
-                    child: widget.waitingForOtherParticipant!,
-                  ),
+                child: WaitingBannerGate(
+                  call: call,
+                  child: widget.waitingForOtherParticipant!,
                 ),
               ),
           ],
