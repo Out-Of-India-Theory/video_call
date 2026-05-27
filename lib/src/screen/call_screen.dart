@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
@@ -137,17 +138,31 @@ class _CallScreenState extends State<CallScreen> {
     final perm = await _gate.request(includeCamera: !widget.audioOnly);
     if (!mounted) return;
     if (!perm.granted) {
-      // Always offer "Open Settings" rather than Retry. Retry is unreliable:
+      // Mobile: offer "Open Settings" rather than Retry. Retry is unreliable —
       // on iOS the OS returns "denied" immediately on subsequent request()
       // calls without re-prompting; on Android once the user hits "Don't ask
       // again" Retry stops working. Settings always works.
+      //
+      // Web: invert the buttons. `openAppSettings()` from permission_handler
+      // is a no-op on web (returns SynchronousFuture(false)) since there is
+      // no programmatic way to open browser permission settings. Retry is
+      // useful instead: `permission_handler_html` calls `getUserMedia(...)`
+      // directly, so a second request re-prompts when the user merely
+      // dismissed the prompt, and silently fails when they hard-blocked —
+      // in which case the copy points them to the address-bar icon, after
+      // which Retry succeeds.
       final scope = widget.audioOnly ? 'Microphone' : 'Camera and microphone';
+      final message = kIsWeb
+          ? '$scope access is required. Click the camera/microphone icon '
+                'in your browser\'s address bar to allow access, then tap '
+                'Retry. If Retry keeps failing, reload the page.'
+          : '$scope access is required. Tap "Open Settings" to enable.';
       setState(
         () => _phase = _Errored(
           OitVideoCallErrorCode.permissionDenied,
-          '$scope access is required. Tap "Open Settings" to enable.',
-          canRetry: false,
-          canOpenSettings: true,
+          message,
+          canRetry: kIsWeb,
+          canOpenSettings: !kIsWeb,
         ),
       );
       return;
