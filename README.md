@@ -172,13 +172,58 @@ connecting, and — new in 1.1.0 — the mini-view End button). Always use the
 be invoked from a different widget tree than the one that built
 `OitVideoCall.callScreen(...)`.
 
+## Web support
+
+The plugin runs on Flutter web. The underlying `stream_video` SDK ships
+explicit web bindings (it switches to `connect_html.dart` /
+`rtc_audio_html.dart` via `dart.library.js_interop` conditional imports
+and routes WebRTC through `dart_webrtc`'s js-interop wrapper around
+`navigator.mediaDevices` / `RTCPeerConnection`), so a 1:1 audio + video
+consultation works end-to-end in the browser with no host-side changes.
+
+What you get on web:
+- Join / leave the call (the screen drives the same
+  `ActiveCallController.connectAndJoin` lifecycle on every platform).
+- Audio + video tracks rendered via `StreamCallContainer`'s default
+  participant grid, including mic / camera toggles.
+- The host-supplied `confirmLeave` bottom sheet and `onCallEnded`
+  callback fire as on mobile.
+
+What doesn't work on web (silently degrades, no host changes required):
+- **In-app PiP via `OitVideoCallHost`.** The mini view itself still
+  draws as a Flutter overlay, but the OS-level Picture-in-Picture
+  fallbacks (`StreamPictureInPictureUiKitView` on iOS,
+  `StreamPictureInPictureAndroidView` on Android) are no-ops on web.
+  Tap-to-expand and end-from-mini both still work.
+- **`openAppSettings()`** — there is no programmatic way to open
+  browser permission settings; the call returns `false`. The
+  permission-denied error screen still renders and offers the button,
+  but tapping it has no effect. Users have to click the camera / mic
+  icon in the browser's address bar manually. Host apps targeting web
+  should override the denial copy accordingly (see the snippet below).
+
+### Web permission handling
+
+`permission_handler_html` requests microphone / camera by calling
+`getUserMedia(...)` directly, which triggers the browser's permission
+prompt. There is no equivalent of Android's "Don't ask again" state on
+the web — any denial (this session, persistent block, missing devices,
+insecure context) is reported as `PermissionStatus.permanentlyDenied`.
+The call screen's denial UI treats that as "send the user to settings",
+which is the right intent but the wrong mechanism on web (see above).
+
+For host apps that need a web-tailored prompt, listen for the denial in
+your own wrapper around `OitVideoCall.callScreen(...)` and render
+browser-specific copy ("Click the camera icon in your address bar to
+allow access, then reload").
+
 ## Out of scope (v1)
 
 - Push notifications / incoming-call ringing
-- Background calling (system-level PiP)
+- Background calling (system-level PiP, web included)
 - Custom theming
 - Group calls, screen share, recording
-- Web / desktop platforms
+- Desktop platforms (macOS / Windows / Linux)
 
 ## Demo
 

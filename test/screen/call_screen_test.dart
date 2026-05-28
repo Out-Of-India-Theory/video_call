@@ -8,6 +8,7 @@ import 'package:oit_video_call/src/config.dart';
 import 'package:oit_video_call/src/models/video_user.dart';
 import 'package:oit_video_call/src/screen/call_screen.dart';
 import 'package:oit_video_call/src/screen/permission_gate.dart';
+import 'package:oit_video_call/src/screen/waiting_banner_gate.dart';
 
 import 'fake_call_session.dart';
 import 'fake_permission_gate.dart';
@@ -576,5 +577,25 @@ void main() {
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 10));
     }
+  });
+
+  // -----------------------------------------------------------------
+  // Waiting-for-other-participant banner: gate-level behavior lives in
+  // `waiting_banner_gate_test.dart`. Here we keep one regression test that
+  // proves CallScreen does not mount a gate at all when the param is null.
+  // -----------------------------------------------------------------
+
+  testWidgets('CallScreen does not mount a banner when waitingForOtherParticipant is null', (tester) async {
+    final session = FakeCallSession();
+    final gate = FakePermissionGate();
+    _swallowRenderPhaseMockErrors();
+
+    final hosted = _host(config: _config(), session: session, gate: gate);
+    await tester.pumpWidget(hosted.widget);
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    expect(find.byType(WaitingBannerGate), findsNothing);
   });
 }

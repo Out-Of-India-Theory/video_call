@@ -1,6 +1,6 @@
 name: oit_video_call
 description: OIT shared Flutter plugin wrapping Stream Video for Dharmayana apps.
-version: 1.3.5
+version: 1.4.2
 publish_to: 'none'
 
 environment:

@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.4.2
+
+- **fix (web)**: the permission-denied screen now offers **Retry** instead of
+  "Open Settings" on web, and the copy points users to the address-bar
+  camera/microphone icon. `openAppSettings()` from `permission_handler` is a
+  no-op on web (returns `SynchronousFuture(false)`) — there is no
+  programmatic way to open browser permission settings, so the previous
+  button was a dead-end. Re-requesting via `getUserMedia(...)`, on the other
+  hand, *does* work whenever the user merely dismissed the prompt rather
+  than hard-blocked the origin; for the hard-block case the new copy
+  directs them to the address-bar icon, after which the same Retry tap
+  succeeds. Mobile copy + button matrix are unchanged
+  (`canOpenSettings: true`, `canRetry: false`). The branch lives at the
+  call site (`_start()` in `call_screen.dart`); `PermissionGate` itself
+  stays platform-agnostic. Existing `call_screen_test` cases continue to
+  assert the mobile behavior — they pass because `kIsWeb` is `false` in
+  the Dart VM where unit tests run.
+- **docs**: README's "Out of scope (v1)" no longer lists Web. New **"Web
+  support"** section documents the working surface (1:1 audio + video via
+  `stream_video`'s explicit web bindings + `dart_webrtc`'s js-interop
+  WebRTC wrapper), the degraded surface (in-app PiP mini still draws as a
+  Flutter overlay, but OS-level PiP fallbacks are no-ops; `openAppSettings`
+  is a no-op), and the permission-handler quirks on web (any denial maps
+  to `PermissionStatus.permanentlyDenied` regardless of intent). Desktop
+  platforms remain out of scope.
+
+## 1.4.1
+
+- Fix: position the host-supplied waiting banner below Stream's `CallAppBar` so the back and disconnect controls remain accessible. Previously the banner sat flush with the status bar and overlapped the app bar.
+
+## 1.4.0
+
+- Add `waitingForOtherParticipant` to `OitVideoCall.callScreen(...)` — host apps can supply a custom widget rendered over the call screen while the local user is the only participant. Latches off the first time a remote joins.
+
 ## 1.3.5
 
 - **chore (UX)**: split mini size by platform. iOS now 170×230 (trimmed

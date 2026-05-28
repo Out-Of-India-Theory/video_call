@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
@@ -10,6 +11,7 @@ import '../config.dart';
 import '../errors.dart';
 import 'error_view.dart';
 import 'permission_gate.dart';
+import 'waiting_banner_gate.dart';
 
 @visibleForTesting
 class CallScreenDeps {
@@ -30,6 +32,7 @@ class CallScreen extends StatefulWidget {
     this.createIfMissing = false,
     this.onCallEnded,
     this.confirmLeave,
+    this.waitingForOtherParticipant,
     @visibleForTesting this.deps,
   });
 
@@ -52,6 +55,10 @@ class CallScreen extends StatefulWidget {
   /// apps wire this to whatever confirmation UI matches their design system
   /// (bottom sheet, dialog, etc.).
   final Future<bool> Function(BuildContext context)? confirmLeave;
+
+  /// Optional widget rendered over the call screen while the local user is
+  /// alone in the call (no remote participants yet).
+  final Widget? waitingForOtherParticipant;
 
   @visibleForTesting
   final CallScreenDeps? deps;
@@ -130,17 +137,31 @@ class _CallScreenState extends State<CallScreen> {
     final perm = await _gate.request(includeCamera: !widget.audioOnly);
     if (!mounted) return;
     if (!perm.granted) {
-      // Always offer "Open Settings" rather than Retry. Retry is unreliable:
+      // Mobile: offer "Open Settings" rather than Retry. Retry is unreliable —
       // on iOS the OS returns "denied" immediately on subsequent request()
       // calls without re-prompting; on Android once the user hits "Don't ask
       // again" Retry stops working. Settings always works.
+      //
+      // Web: invert the buttons. `openAppSettings()` from permission_handler
+      // is a no-op on web (returns SynchronousFuture(false)) since there is
+      // no programmatic way to open browser permission settings. Retry is
+      // useful instead: `permission_handler_html` calls `getUserMedia(...)`
+      // directly, so a second request re-prompts when the user merely
+      // dismissed the prompt, and silently fails when they hard-blocked —
+      // in which case the copy points them to the address-bar icon, after
+      // which Retry succeeds.
       final scope = widget.audioOnly ? 'Microphone' : 'Camera and microphone';
+      final message = kIsWeb
+          ? '$scope access is required. Click the camera/microphone icon '
+                'in your browser\'s address bar to allow access, then tap '
+                'Retry. If Retry keeps failing, reload the page.'
+          : '$scope access is required. Tap "Open Settings" to enable.';
       setState(
         () => _phase = _Errored(
           OitVideoCallErrorCode.permissionDenied,
-          '$scope access is required. Tap "Open Settings" to enable.',
-          canRetry: false,
-          canOpenSettings: true,
+          message,
+          canRetry: kIsWeb,
+          canOpenSettings: !kIsWeb,
         ),
       );
       return;
@@ -306,14 +327,31 @@ class _CallScreenState extends State<CallScreen> {
             onRetry: r ? _retry : null,
             onOpenSettings: s ? () => _openSettings() : null,
           ),
-        _Ready(call: final call) => StreamCallContainer(
-          call: call,
-          pictureInPictureConfiguration: const PictureInPictureConfiguration(
-            enablePictureInPicture: true,
-          ),
-          onBackPressed: _onBackPressed,
-          onLeaveCallTap: () => unawaited(_onLeaveCallTap()),
-          onCallDisconnected: _onCallDisconnected,
+        _Ready(call: final call) => Stack(
+          children: [
+            StreamCallContainer(
+              call: call,
+              pictureInPictureConfiguration:
+                  const PictureInPictureConfiguration(
+                enablePictureInPicture: true,
+              ),
+              onBackPressed: _onBackPressed,
+              onLeaveCallTap: () => unawaited(_onLeaveCallTap()),
+              onCallDisconnected: _onCallDisconnected,
+            ),
+            // Offset by status bar + Material AppBar height so the banner sits just below
+            // Stream's CallAppBar instead of overlapping the back/leave controls.
+            if (widget.waitingForOtherParticipant != null)
+              Positioned(
+                top: MediaQuery.of(context).padding.top + kToolbarHeight,
+                left: 0,
+                right: 0,
+                child: WaitingBannerGate(
+                  call: call,
+                  child: widget.waitingForOtherParticipant!,
+                ),
+              ),
+          ],
         ),
       },
     );
