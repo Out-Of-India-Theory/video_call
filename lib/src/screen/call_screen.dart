@@ -57,8 +57,7 @@ class CallScreen extends StatefulWidget {
   final Future<bool> Function(BuildContext context)? confirmLeave;
 
   /// Optional widget rendered over the call screen while the local user is
-  /// alone in the call (no remote participants yet). Wired in Task 2 — for
-  /// now this is plumbing only; the field is unused.
+  /// alone in the call (no remote participants yet).
   final Widget? waitingForOtherParticipant;
 
   @visibleForTesting

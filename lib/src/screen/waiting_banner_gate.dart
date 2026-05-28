@@ -22,7 +22,6 @@ class WaitingBannerGate extends StatefulWidget {
 
 class _WaitingBannerGateState extends State<WaitingBannerGate> {
   bool _latched = false;
-  int? _lastCount;
   StreamSubscription<CallState>? _sub;
 
   @override
@@ -46,12 +45,6 @@ class _WaitingBannerGateState extends State<WaitingBannerGate> {
     if (_latched) return;
     if (_hasRemote(state)) {
       setState(() => _latched = true);
-      return;
-    }
-    final count = state.callParticipants.length;
-    if (count != _lastCount) {
-      _lastCount = count;
-      setState(() {});
     }
   }
 
