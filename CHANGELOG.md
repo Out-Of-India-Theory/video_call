@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.4.3
+
+- **fix (web)**: hide the speakerphone toggle and flip-camera buttons from
+  the in-call control bar on web. Stream's `ToggleSpeakerphoneOption` and
+  `FlipCameraOption` are documented as Android/iOS only — browsers don't
+  expose earpiece-vs-speaker output routing, and `Call.flipCamera` bridges
+  to mobile-WebRTC `switchCamera()` which is a no-op on web. Tapping them
+  did nothing, leaving the user staring at a dead button. The web call
+  screen now installs a `callContentWidgetBuilder` that swaps in a
+  `StreamCallControls` containing just `ToggleCameraOption` +
+  `ToggleMicrophoneOption`. Mobile keeps Stream's full default option set
+  unchanged (the new branch is `kIsWeb`-gated in `_buildScaffold`).
+
 ## 1.4.2
 
 - **fix (web)**: the permission-denied screen now offers **Retry** instead of
