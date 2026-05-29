@@ -338,6 +338,28 @@ class _CallScreenState extends State<CallScreen> {
               onBackPressed: _onBackPressed,
               onLeaveCallTap: () => unawaited(_onLeaveCallTap()),
               onCallDisconnected: _onCallDisconnected,
+              // On web, override the default controls bar to drop the
+              // speakerphone toggle and flip-camera button. Stream's
+              // implementations are documented as Android/iOS only — on web
+              // they render but their handlers no-op (browsers don't expose
+              // earpiece/speaker output routing, and `Call.flipCamera`
+              // bridges to mobile WebRTC switchCamera). Mobile keeps Stream's
+              // defaults.
+              callContentWidgetBuilder: kIsWeb
+                  ? (context, call) => StreamCallContent(
+                        call: call,
+                        onBackPressed: _onBackPressed,
+                        onLeaveCallTap: () => unawaited(_onLeaveCallTap()),
+                        pictureInPictureConfiguration:
+                            const PictureInPictureConfiguration(
+                          enablePictureInPicture: true,
+                        ),
+                        callControlsWidgetBuilder: (_, call) =>
+                            StreamCallControls(
+                          options: webCallControlOptions(call: call),
+                        ),
+                      )
+                  : null,
             ),
             // Offset by status bar + Material AppBar height so the banner sits just below
             // Stream's CallAppBar instead of overlapping the back/leave controls.
@@ -368,3 +390,12 @@ class _CallScreenState extends State<CallScreen> {
     _start();
   }
 }
+
+/// Web-only call control bar — Stream's default option set minus the
+/// speakerphone toggle and flip-camera button, which are mobile-only and
+/// silently no-op on web.
+@visibleForTesting
+List<Widget> webCallControlOptions({required Call call}) => [
+      ToggleCameraOption(call: call),
+      ToggleMicrophoneOption(call: call),
+    ];
