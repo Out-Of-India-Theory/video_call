@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.4.4
+
+- **fix (web)**: resilient permission flow — addresses a hard-block on
+  Oppo Chrome where users with "Always allow" set for camera in browser
+  settings still hit the permission-denied error screen. Two related
+  changes: (1) `RealPermissionGate` now calls `Permission.x.status`
+  before `.request()` and only invokes `.request()` for permissions
+  whose status isn't already `granted`. On web, `.status` queries the
+  W3C Permissions API which returns `granted` for site settings like
+  Chrome's "Always allow" — without firing `getUserMedia`. That
+  sidesteps a fragility in `permission_handler_html.requestPermissions`,
+  which fires `getUserMedia({audio:true})` then
+  `getUserMedia({video:true})` back-to-back; on mobile Chrome the second
+  sequential call can throw `DOMException` (e.g. `NotReadableError` while
+  the just-stopped mic track is still releasing the device), turning an
+  already-granted camera into `permanentlyDenied`. (2) Camera is now
+  best-effort: `PermissionResult` exposes separate `microphoneGranted`
+  (mandatory) and `cameraGranted` fields; `CallScreen._start()` blocks
+  only on mic denial and downgrades the join to `audioOnly` when camera
+  is denied. The user joins audio-only and can grant camera later via
+  the in-call toggle. Mic-only error copy updated accordingly.
+
 ## 1.4.3
 
 - **fix (web)**: hide the speakerphone toggle and flip-camera buttons from
@@ -12,6 +34,7 @@
   `StreamCallControls` containing just `ToggleCameraOption` +
   `ToggleMicrophoneOption`. Mobile keeps Stream's full default option set
   unchanged (the new branch is `kIsWeb`-gated in `_buildScaffold`).
+
 
 ## 1.4.2
 
