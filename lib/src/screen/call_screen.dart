@@ -134,9 +134,17 @@ class _CallScreenState extends State<CallScreen> {
   Future<void> _start() async {
     // Phase 1: permissions — stays in the screen because the "open settings"
     // prompt requires BuildContext.
+    //
+    // Microphone is mandatory (no audio = can't participate). Camera is
+    // best-effort: if the user declines, we downgrade to audio-only and
+    // proceed with the join rather than block — the user can still
+    // hear/talk and can grant camera mid-call via the in-call toggle.
+    // This also makes us more resilient to one-permission-fails edge cases
+    // on web (e.g. browsers that silently fail the camera getUserMedia
+    // while microphone succeeds).
     final perm = await _gate.request(includeCamera: !widget.audioOnly);
     if (!mounted) return;
-    if (!perm.granted) {
+    if (!perm.microphoneGranted) {
       // Mobile: offer "Open Settings" rather than Retry. Retry is unreliable —
       // on iOS the OS returns "denied" immediately on subsequent request()
       // calls without re-prompting; on Android once the user hits "Don't ask
@@ -150,12 +158,11 @@ class _CallScreenState extends State<CallScreen> {
       // dismissed the prompt, and silently fails when they hard-blocked —
       // in which case the copy points them to the address-bar icon, after
       // which Retry succeeds.
-      final scope = widget.audioOnly ? 'Microphone' : 'Camera and microphone';
-      final message = kIsWeb
-          ? '$scope access is required. Click the camera/microphone icon '
+      const message = kIsWeb
+          ? 'Microphone access is required. Click the microphone icon '
                 'in your browser\'s address bar to allow access, then tap '
                 'Retry. If Retry keeps failing, reload the page.'
-          : '$scope access is required. Tap "Open Settings" to enable.';
+          : 'Microphone access is required. Tap "Open Settings" to enable.';
       setState(
         () => _phase = _Errored(
           OitVideoCallErrorCode.permissionDenied,
@@ -167,12 +174,18 @@ class _CallScreenState extends State<CallScreen> {
       return;
     }
 
+    // Camera is best-effort. When not granted (either because the user
+    // declined or because we didn't ask — audio-only), downgrade the join
+    // so `connectAndJoin` runs `setCameraEnabled(false)` post-join and
+    // the SDK doesn't try to publish a video track without permission.
+    final effectiveAudioOnly = widget.audioOnly || !perm.cameraGranted;
+
     // Phases 2–5 are owned by the controller now.
     final result = await _controller.connectAndJoin(
       config: widget.config,
       callId: widget.callId,
       callType: widget.callType,
-      audioOnly: widget.audioOnly,
+      audioOnly: effectiveAudioOnly,
       createIfMissing: widget.createIfMissing,
     );
     if (!mounted) return;
