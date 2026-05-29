@@ -67,10 +67,14 @@ void _swallowRenderPhaseMockErrors() {
 }
 
 void main() {
-  testWidgets('phase 1: temporarily denied → Open Settings (no Retry)', (tester) async {
+  testWidgets('phase 1: mic temporarily denied → Open Settings (no Retry)', (tester) async {
     final session = FakeCallSession();
     final gate = FakePermissionGate()
-      ..result = const PermissionResult(granted: false, permanentlyDenied: false);
+      ..result = const PermissionResult(
+        microphoneGranted: false,
+        cameraGranted: false,
+        permanentlyDenied: false,
+      );
 
     await tester.pumpWidget(_host(config: _config(), session: session, gate: gate).widget);
     await tester.pumpAndSettle();
@@ -80,10 +84,14 @@ void main() {
     expect(find.text('Retry'), findsNothing);
   });
 
-  testWidgets('phase 1: permanently denied → Open Settings (no Retry)', (tester) async {
+  testWidgets('phase 1: mic permanently denied → Open Settings (no Retry)', (tester) async {
     final session = FakeCallSession();
     final gate = FakePermissionGate()
-      ..result = const PermissionResult(granted: false, permanentlyDenied: true);
+      ..result = const PermissionResult(
+        microphoneGranted: false,
+        cameraGranted: false,
+        permanentlyDenied: true,
+      );
 
     await tester.pumpWidget(_host(config: _config(), session: session, gate: gate).widget);
     await tester.pumpAndSettle();
@@ -93,10 +101,14 @@ void main() {
     expect(find.text('Retry'), findsNothing);
   });
 
-  testWidgets('phase 1: audioOnly denial message says "Microphone" not "Camera"', (tester) async {
+  testWidgets('phase 1: mic denial in audioOnly mode shows "Microphone" copy', (tester) async {
     final session = FakeCallSession();
     final gate = FakePermissionGate()
-      ..result = const PermissionResult(granted: false, permanentlyDenied: false);
+      ..result = const PermissionResult(
+        microphoneGranted: false,
+        cameraGranted: null,
+        permanentlyDenied: false,
+      );
 
     await tester.pumpWidget(_host(
       config: _config(),
@@ -108,6 +120,58 @@ void main() {
 
     expect(find.textContaining('Microphone'), findsOneWidget);
     expect(find.textContaining('Camera'), findsNothing);
+  });
+
+  testWidgets('phase 1: mic granted + camera denied → joins audio-only (no error)', (tester) async {
+    final session = FakeCallSession();
+    final gate = FakePermissionGate()
+      ..result = const PermissionResult(
+        microphoneGranted: true,
+        cameraGranted: false,
+        permanentlyDenied: false,
+      );
+
+    _swallowRenderPhaseMockErrors();
+
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate).widget);
+    // Don't pumpAndSettle — _Ready triggers StreamCallContainer which would
+    // invoke mocked Call methods. Pump enough frames for the phase chain.
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    // No error screen.
+    expect(find.text('Open Settings'), findsNothing);
+    expect(find.text('Retry'), findsNothing);
+    // Camera was requested (host wanted video), the user declined, and we
+    // downgraded — connectAndJoin runs setCameraEnabled(false) post-join.
+    expect(gate.lastIncludeCamera, true);
+    expect(session.joinCount, 1);
+    expect(session.cameraEnabledCalls, contains(false));
+  });
+
+  testWidgets('phase 1: mic granted + camera permanently denied → joins audio-only', (tester) async {
+    final session = FakeCallSession();
+    final gate = FakePermissionGate()
+      ..result = const PermissionResult(
+        microphoneGranted: true,
+        cameraGranted: false,
+        permanentlyDenied: true,
+      );
+
+    _swallowRenderPhaseMockErrors();
+
+    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate).widget);
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+
+    // Camera being *permanently* denied is still best-effort: we don't
+    // hard-block the call. The user can grant camera later via browser /
+    // OS settings and toggle it on mid-call.
+    expect(find.text('Open Settings'), findsNothing);
+    expect(session.joinCount, 1);
+    expect(session.cameraEnabledCalls, contains(false));
   });
 
   testWidgets('audioOnly skips camera permission', (tester) async {

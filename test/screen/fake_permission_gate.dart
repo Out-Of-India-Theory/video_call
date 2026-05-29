@@ -5,7 +5,8 @@ import 'package:oit_video_call/src/screen/permission_gate.dart';
 /// branches; assert [requestCount] / [lastIncludeCamera] afterwards.
 class FakePermissionGate implements PermissionGate {
   PermissionResult result = const PermissionResult(
-    granted: true,
+    microphoneGranted: true,
+    cameraGranted: true,
     permanentlyDenied: false,
   );
   bool? lastIncludeCamera;

@@ -1,14 +1,26 @@
 import 'package:permission_handler/permission_handler.dart';
 
 /// Outcome of an OS permission request.
+///
+/// Microphone is mandatory — without it the user can't participate in the
+/// call. Camera is best-effort: when the user declines, the screen
+/// downgrades to audio-only rather than blocking the join, so they can
+/// still hear/talk and grant camera mid-call via the in-call toggle.
 class PermissionResult {
   const PermissionResult({
-    required this.granted,
+    required this.microphoneGranted,
+    required this.cameraGranted,
     required this.permanentlyDenied,
   });
 
-  /// True only when every requested permission was granted.
-  final bool granted;
+  /// True when microphone is granted.
+  final bool microphoneGranted;
+
+  /// True when camera is granted. `null` when camera was not requested
+  /// (`includeCamera: false`, i.e. an audio-only call) — distinguishes
+  /// "not asked" from "asked and declined" so the caller can choose to
+  /// downgrade to audio-only only in the latter case.
+  final bool? cameraGranted;
 
   /// True when at least one requested permission has been permanently denied
   /// — the screen should prompt the user to open app settings.
@@ -30,13 +42,54 @@ class RealPermissionGate implements PermissionGate {
       Permission.microphone,
       if (includeCamera) Permission.camera,
     ];
-    final statuses = await permissions.request();
-    final granted = statuses.values.every((s) => s.isGranted);
-    final permanentlyDenied = statuses.values.any(
-      (s) => s.isPermanentlyDenied,
-    );
+
+    // Pre-check status and only `.request()` the permissions that aren't
+    // already granted. On web, `Permission.x.status` queries the W3C
+    // Permissions API (`navigator.permissions.query`) which returns
+    // `granted` for site settings like Chrome's "Always allow" — without
+    // triggering `getUserMedia`. This sidesteps a fragility in
+    // `permission_handler_html`'s `requestPermissions`: it loops
+    // permission-by-permission, calling `getUserMedia({audio:true})` then
+    // `getUserMedia({video:true})` back-to-back. On mobile Chrome (seen
+    // on Oppo) the second call can throw `DOMException` (e.g.
+    // `NotReadableError` while the just-stopped mic track is still
+    // releasing the device) — `permission_handler_html` then reports the
+    // already-granted camera as `permanentlyDenied`, even though the
+    // browser never blocked us. Skipping the call when the Permissions
+    // API already says `granted` is the smallest correct fix and is a
+    // no-op on iOS/Android, where `status` reflects the same allow state
+    // that `request()` would short-circuit on.
+    final statuses = <Permission, PermissionStatus>{};
+    final toRequest = <Permission>[];
+    for (final p in permissions) {
+      // `permission_handler_html.query()` throws `TypeError` on browsers
+      // that don't accept `camera`/`microphone` as Permissions API names
+      // (e.g. Safari < 16). Treat that as "unknown — go ask" rather than
+      // letting it bubble; falling through to `.request()` preserves the
+      // pre-fix behavior for those browsers.
+      PermissionStatus current;
+      try {
+        current = await p.status;
+      } catch (_) {
+        current = PermissionStatus.denied;
+      }
+      if (current.isGranted) {
+        statuses[p] = current;
+      } else {
+        toRequest.add(p);
+      }
+    }
+    if (toRequest.isNotEmpty) {
+      statuses.addAll(await toRequest.request());
+    }
+
+    final micStatus = statuses[Permission.microphone];
+    final camStatus = includeCamera ? statuses[Permission.camera] : null;
+    final permanentlyDenied = (micStatus?.isPermanentlyDenied ?? false) ||
+        (camStatus?.isPermanentlyDenied ?? false);
     return PermissionResult(
-      granted: granted,
+      microphoneGranted: micStatus?.isGranted ?? false,
+      cameraGranted: includeCamera ? (camStatus?.isGranted ?? false) : null,
       permanentlyDenied: permanentlyDenied,
     );
   }
