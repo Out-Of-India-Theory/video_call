@@ -174,14 +174,11 @@ class _CallScreenState extends State<CallScreen> {
       return;
     }
 
-    // Camera is best-effort. If we asked for it and the user declined
-    // (`cameraGranted == false`), downgrade the join to audio-only so
-    // `connectAndJoin` will `setCameraEnabled(false)` after join and the
-    // SDK won't attempt to publish a video track without permission.
-    // `cameraGranted == null` means we didn't ask (`audioOnly` was already
-    // true) — same downgrade.
-    final effectiveAudioOnly =
-        widget.audioOnly || perm.cameraGranted != true;
+    // Camera is best-effort. When not granted (either because the user
+    // declined or because we didn't ask — audio-only), downgrade the join
+    // so `connectAndJoin` runs `setCameraEnabled(false)` post-join and
+    // the SDK doesn't try to publish a video track without permission.
+    final effectiveAudioOnly = widget.audioOnly || !perm.cameraGranted;
 
     // Phases 2–5 are owned by the controller now.
     final result = await _controller.connectAndJoin(

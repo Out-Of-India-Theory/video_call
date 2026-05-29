@@ -7,7 +7,6 @@ class FakePermissionGate implements PermissionGate {
   PermissionResult result = const PermissionResult(
     microphoneGranted: true,
     cameraGranted: true,
-    permanentlyDenied: false,
   );
   bool? lastIncludeCamera;
   int requestCount = 0;

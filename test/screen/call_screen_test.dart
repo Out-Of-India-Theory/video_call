@@ -67,30 +67,12 @@ void _swallowRenderPhaseMockErrors() {
 }
 
 void main() {
-  testWidgets('phase 1: mic temporarily denied → Open Settings (no Retry)', (tester) async {
+  testWidgets('phase 1: mic denied → Open Settings (no Retry)', (tester) async {
     final session = FakeCallSession();
     final gate = FakePermissionGate()
       ..result = const PermissionResult(
         microphoneGranted: false,
         cameraGranted: false,
-        permanentlyDenied: false,
-      );
-
-    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate).widget);
-    await tester.pumpAndSettle();
-
-    expect(find.textContaining('required'), findsOneWidget);
-    expect(find.text('Open Settings'), findsOneWidget);
-    expect(find.text('Retry'), findsNothing);
-  });
-
-  testWidgets('phase 1: mic permanently denied → Open Settings (no Retry)', (tester) async {
-    final session = FakeCallSession();
-    final gate = FakePermissionGate()
-      ..result = const PermissionResult(
-        microphoneGranted: false,
-        cameraGranted: false,
-        permanentlyDenied: true,
       );
 
     await tester.pumpWidget(_host(config: _config(), session: session, gate: gate).widget);
@@ -106,8 +88,7 @@ void main() {
     final gate = FakePermissionGate()
       ..result = const PermissionResult(
         microphoneGranted: false,
-        cameraGranted: null,
-        permanentlyDenied: false,
+        cameraGranted: false,
       );
 
     await tester.pumpWidget(_host(
@@ -128,7 +109,6 @@ void main() {
       ..result = const PermissionResult(
         microphoneGranted: true,
         cameraGranted: false,
-        permanentlyDenied: false,
       );
 
     _swallowRenderPhaseMockErrors();
@@ -140,36 +120,12 @@ void main() {
       await tester.pump(const Duration(milliseconds: 10));
     }
 
-    // No error screen.
+    // No error screen — best-effort camera doesn't block the join.
     expect(find.text('Open Settings'), findsNothing);
     expect(find.text('Retry'), findsNothing);
     // Camera was requested (host wanted video), the user declined, and we
     // downgraded — connectAndJoin runs setCameraEnabled(false) post-join.
     expect(gate.lastIncludeCamera, true);
-    expect(session.joinCount, 1);
-    expect(session.cameraEnabledCalls, contains(false));
-  });
-
-  testWidgets('phase 1: mic granted + camera permanently denied → joins audio-only', (tester) async {
-    final session = FakeCallSession();
-    final gate = FakePermissionGate()
-      ..result = const PermissionResult(
-        microphoneGranted: true,
-        cameraGranted: false,
-        permanentlyDenied: true,
-      );
-
-    _swallowRenderPhaseMockErrors();
-
-    await tester.pumpWidget(_host(config: _config(), session: session, gate: gate).widget);
-    for (var i = 0; i < 20; i++) {
-      await tester.pump(const Duration(milliseconds: 10));
-    }
-
-    // Camera being *permanently* denied is still best-effort: we don't
-    // hard-block the call. The user can grant camera later via browser /
-    // OS settings and toggle it on mid-call.
-    expect(find.text('Open Settings'), findsNothing);
     expect(session.joinCount, 1);
     expect(session.cameraEnabledCalls, contains(false));
   });

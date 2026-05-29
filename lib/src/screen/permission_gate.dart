@@ -3,28 +3,22 @@ import 'package:permission_handler/permission_handler.dart';
 /// Outcome of an OS permission request.
 ///
 /// Microphone is mandatory — without it the user can't participate in the
-/// call. Camera is best-effort: when the user declines, the screen
-/// downgrades to audio-only rather than blocking the join, so they can
-/// still hear/talk and grant camera mid-call via the in-call toggle.
+/// call. Camera is best-effort: when not granted, the screen downgrades
+/// to audio-only rather than blocking the join, so the user can still
+/// hear/talk and grant camera mid-call via the in-call toggle.
 class PermissionResult {
   const PermissionResult({
     required this.microphoneGranted,
     required this.cameraGranted,
-    required this.permanentlyDenied,
   });
 
   /// True when microphone is granted.
   final bool microphoneGranted;
 
-  /// True when camera is granted. `null` when camera was not requested
-  /// (`includeCamera: false`, i.e. an audio-only call) — distinguishes
-  /// "not asked" from "asked and declined" so the caller can choose to
-  /// downgrade to audio-only only in the latter case.
-  final bool? cameraGranted;
-
-  /// True when at least one requested permission has been permanently denied
-  /// — the screen should prompt the user to open app settings.
-  final bool permanentlyDenied;
+  /// True when camera was requested and granted. False either when camera
+  /// was not requested (audio-only join) or when it was requested and
+  /// declined — the caller joins audio-only in both cases.
+  final bool cameraGranted;
 }
 
 /// Requests OS permissions. Abstracted so unit tests can swap in a fake
@@ -85,12 +79,9 @@ class RealPermissionGate implements PermissionGate {
 
     final micStatus = statuses[Permission.microphone];
     final camStatus = includeCamera ? statuses[Permission.camera] : null;
-    final permanentlyDenied = (micStatus?.isPermanentlyDenied ?? false) ||
-        (camStatus?.isPermanentlyDenied ?? false);
     return PermissionResult(
       microphoneGranted: micStatus?.isGranted ?? false,
-      cameraGranted: includeCamera ? (camStatus?.isGranted ?? false) : null,
-      permanentlyDenied: permanentlyDenied,
+      cameraGranted: camStatus?.isGranted ?? false,
     );
   }
 }
