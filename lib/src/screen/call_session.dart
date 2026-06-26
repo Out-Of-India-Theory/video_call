@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
 
+import '../ring/stream_ring_service.dart';
+
 /// Thrown by [CallSession.getCall] when the backend returns 404 for the
 /// requested call id. The screen treats this distinctly from other errors
 /// so it can show a "Call not available" message instead of a generic one.
@@ -66,6 +68,11 @@ class StreamCallSession implements CallSession {
     required User user,
     required String token,
   }) async {
+    // When the long-lived ring connection is active, a [StreamVideo] singleton
+    // already exists (constructed by StreamRingService at startup). Reuse it —
+    // constructing a second one throws (failIfSingletonExists defaults to true)
+    // and would drop the push-manager-equipped instance that receives rings.
+    if (StreamRingService.instance.isActive) return;
     // Constructing `StreamVideo` installs it as the singleton instance via
     // `_instanceHolder.install`. We only need the side effect; the returned
     // instance is reachable later via `StreamVideo.instance`.
@@ -140,6 +147,10 @@ class StreamCallSession implements CallSession {
 
   @override
   Future<void> dispose() async {
+    // Keep the long-lived ring connection alive across individual calls — only
+    // StreamRingService.unregister (logout) tears it down. Resetting here would
+    // stop the device receiving future rings.
+    if (StreamRingService.instance.isActive) return;
     await StreamVideo.reset();
   }
 }
