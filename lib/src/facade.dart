@@ -1,8 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+
 import 'active_call/active_call_controller.dart';
 import 'config.dart';
 import 'errors.dart';
 import 'models/video_user.dart';
+import 'ring/stream_ring_config.dart';
+import 'ring/stream_ring_service.dart';
 import 'screen/call_screen.dart';
 import 'screen/error_view.dart';
 
@@ -135,6 +140,46 @@ class OitVideoCall {
   /// is already idle.
   static Future<void> endCall({bool forEveryone = false}) async {
     await _controller?.endCall(forEveryone: forEveryone);
+  }
+
+  /// Registers the long-lived ring connection so this device receives
+  /// server-initiated call rings (Flow A) and re-rings (Flow B) while the app
+  /// is foregrounded, backgrounded, or killed. Call once at startup for
+  /// eligible users (those with an upcoming consultation). Idempotent.
+  static Future<void> registerRinging({
+    required String apiKey,
+    required VideoUser user,
+    required TokenProvider tokenProvider,
+    required StreamRingProviderNames providerNames,
+  }) {
+    return StreamRingService.instance.register(
+      apiKey: apiKey,
+      user: user,
+      tokenProvider: tokenProvider,
+      providerNames: providerNames,
+    );
+  }
+
+  /// Forwards a background/terminated FCM data message to the SDK so it can
+  /// raise the native incoming-call UI. Returns true if consumed.
+  static Future<bool> handleBackgroundRingPush(Map<String, dynamic> data) {
+    return StreamRingService.instance.handleBackgroundFcm(data);
+  }
+
+  /// Subscribes to "ring accepted"; [onAccept] receives the accepted call id.
+  static StreamSubscription<void>? observeAcceptedRing(
+    void Function(String callId) onAccept,
+  ) {
+    return StreamRingService.instance
+        .observeAccepted((call) => onAccept(call.id));
+  }
+
+  /// Whether the long-lived ring connection is active.
+  static bool get isRingingRegistered => StreamRingService.instance.isActive;
+
+  /// Tears down the ring connection (call on logout).
+  static Future<void> unregisterRinging() {
+    return StreamRingService.instance.unregister();
   }
 
   static Widget callScreen({
