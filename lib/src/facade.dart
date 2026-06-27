@@ -160,10 +160,31 @@ class OitVideoCall {
     );
   }
 
-  /// Forwards a background/terminated FCM data message to the SDK so it can
-  /// raise the native incoming-call UI. Returns true if consumed.
+  /// Forwards a FOREGROUND FCM data message to the live SDK (requires ring
+  /// registration to have run in this isolate). Returns true if consumed.
   static Future<bool> handleBackgroundRingPush(Map<String, dynamic> data) {
     return StreamRingService.instance.handleBackgroundFcm(data);
+  }
+
+  /// Canonical terminated/background-isolate ring handler (per Stream docs):
+  /// creates a standalone [StreamVideo] with the push manager, connects,
+  /// observes core ringing events, and raises the native incoming-call UI.
+  /// Call from the app's top-level `@pragma('vm:entry-point')` FCM handler with
+  /// values read from persisted storage (F.*/Riverpod are unavailable there).
+  static Future<bool> handleBackgroundPush({
+    required String apiKey,
+    required VideoUser user,
+    required TokenProvider tokenProvider,
+    required StreamRingProviderNames providerNames,
+    required Map<String, dynamic> data,
+  }) {
+    return StreamRingService.instance.handleBackgroundPush(
+      apiKey: apiKey,
+      user: user,
+      tokenProvider: tokenProvider,
+      providerNames: providerNames,
+      data: data,
+    );
   }
 
   /// Subscribes to "ring accepted"; [onAccept] receives the accepted call id.
@@ -172,6 +193,13 @@ class OitVideoCall {
   ) {
     return StreamRingService.instance
         .observeAccepted((call) => onAccept(call.id));
+  }
+
+  /// Wires Accept handling (app-alive AND cold-started-by-Accept) so the host
+  /// app can navigate into the call. [onAccepted] receives the accepted call id.
+  /// Call once at startup, after [registerRinging].
+  static void wireRingAccept(void Function(String callId) onAccepted) {
+    StreamRingService.instance.wireAcceptHandling(onAccepted);
   }
 
   /// Whether the long-lived ring connection is active.

@@ -59,8 +59,23 @@ abstract class CallSession {
   Future<void> dispose();
 }
 
+/// Call-level audio policy for a JOINED call.
+///
+/// The ring-reception [StreamVideo] (see [StreamRingService]) is constructed
+/// with [ViewerAudioPolicy] (media playback, `MODE_NORMAL`) so the incoming
+/// ringtone plays at full volume instead of being ducked by communication-mode
+/// routing. A real call, however, needs [BroadcasterAudioPolicy] (echo
+/// cancellation, earpiece/speaker routing, `MODE_IN_COMMUNICATION`). Supplying
+/// it as a CALL PREFERENCE makes the per-call PeerConnectionFactory use
+/// Broadcaster even when we reuse the Viewer-policy ring connection — call
+/// preferences win over the client-level
+/// `StreamVideoOptions.audioConfigurationPolicy` (see `Call._ensurePcFactory`).
+CallPreferences _callAudioPreferences() => DefaultCallPreferences(
+      audioConfigurationPolicy: const BroadcasterAudioPolicy(),
+    );
+
 /// Default implementation of [CallSession] that drives the real Stream
-/// Video SDK (`stream_video` 1.3.x).
+/// Video SDK (`stream_video` 1.4.x).
 class StreamCallSession implements CallSession {
   @override
   Future<void> connect({
@@ -87,6 +102,7 @@ class StreamCallSession implements CallSession {
     final call = StreamVideo.instance.makeCall(
       callType: StreamCallType.fromString(callType),
       id: callId,
+      preferences: _callAudioPreferences(),
     );
     final result = await call.get();
     if (result.isFailure) {
@@ -107,6 +123,7 @@ class StreamCallSession implements CallSession {
     final call = StreamVideo.instance.makeCall(
       callType: StreamCallType.fromString(callType),
       id: callId,
+      preferences: _callAudioPreferences(),
     );
     final result = await call.getOrCreate();
     if (result.isFailure) {
@@ -118,6 +135,10 @@ class StreamCallSession implements CallSession {
 
   @override
   Future<void> joinCall(Call call) async {
+    // Audio policy for the live call (Broadcaster: echo cancellation +
+    // communication-mode routing) is set via the call PREFERENCE in
+    // getCall/getOrCreateCall, which wins over the Viewer policy the reused
+    // ring-reception SDK was constructed with. See [_callAudioPreferences].
     final result = await call.join();
     if (result.isFailure) {
       final failure = result as Failure;
@@ -133,23 +154,34 @@ class StreamCallSession implements CallSession {
   @override
   Future<void> leaveCall(Call call) async {
     await call.leave();
+    // Undo the call's communication-mode audio so in-app media isn't stuck on
+    // the earpiece/call-volume path and the next incoming ring plays loud.
+    // No-op unless the ring connection is active.
+    await StreamRingService.instance.restoreRingAudioPolicy();
   }
 
   @override
   Future<void> endCallForEveryone(Call call) async {
     final result = await call.end();
     if (result.isFailure) {
-      // Permission denied / invalid state. Caller falls back to leaveCall.
+      // Permission denied / invalid state. Caller falls back to leaveCall
+      // (which restores the ring audio policy on its own).
       final failure = result as Failure;
       throw Exception('call.end() failed: ${failure.error}');
     }
+    // Undo communication-mode audio so the next incoming ring plays loud.
+    await StreamRingService.instance.restoreRingAudioPolicy();
   }
 
   @override
   Future<void> dispose() async {
     // Keep the long-lived ring connection alive across individual calls — only
     // StreamRingService.unregister (logout) tears it down. Resetting here would
-    // stop the device receiving future rings.
+    // stop the device receiving future rings. The communication-mode audio this
+    // call applied is reset back to the loud-ring media policy by
+    // [StreamRingService.restoreRingAudioPolicy] on the next ring (and on
+    // graceful leave); doing it here would touch native bindings in the
+    // SDK-reuse unit tests.
     if (StreamRingService.instance.isActive) return;
     await StreamVideo.reset();
   }

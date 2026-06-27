@@ -6,10 +6,22 @@ import 'package:flutter/foundation.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart'
     hide TokenProvider;
 import 'package:stream_video_push_notification/stream_video_push_notification.dart';
+import 'package:uuid/uuid.dart';
 
 import '../config.dart';
 import '../models/video_user.dart';
 import 'stream_ring_config.dart';
+
+/// Incoming-call notification config: a loud system ringtone played as a CALL
+/// (ring stream, not the quiet notification stream) + full-screen on the lock
+/// screen. Without this the ring is barely audible and shows as a plain banner.
+const StreamVideoPushConfiguration _ringPushConfig = StreamVideoPushConfiguration(
+  android: AndroidPushConfiguration(
+    ringtonePath: 'system_ringtone_default',
+    incomingCallNotificationChannelName: 'Incoming Consultations',
+    showFullScreenOnLockScreen: true,
+  ),
+);
 
 /// Owns a long-lived [StreamVideo] connection used to RECEIVE ringing pushes
 /// (server T-5 ring, mitra re-ring) even when the app is backgrounded or
@@ -58,6 +70,22 @@ class StreamRingService {
         name: user.name,
         image: user.image,
       ),
+      // Keep the long-lived ring connection alive when backgrounded so a
+      // backgrounded (not killed) app receives rings over the existing socket
+      // instead of a cold reconnect (per Stream docs).
+      options: StreamVideoOptions(
+        keepConnectionsAliveWhenInBackground: true,
+        // CRITICAL for ring loudness: constructing StreamVideo immediately
+        // calls reinitializeAudioConfiguration(policy). The default
+        // BroadcasterAudioPolicy sets the device to MODE_IN_COMMUNICATION
+        // (voice-call routing), which DUCKS the incoming-call ringtone
+        // (USAGE_NOTIFICATION_RINGTONE on STREAM_RING) to near silence — even
+        // at max ring volume. A ring-RECEPTION connection is not a live call,
+        // so use ViewerAudioPolicy (media playback, MODE_NORMAL): the ring
+        // plays at full volume. The actual joined call (OitVideoCall.init)
+        // keeps the default Broadcaster policy for proper call audio.
+        audioConfigurationPolicy: const ViewerAudioPolicy(),
+      ),
       tokenLoader: (_) => tokenProvider(),
       pushNotificationManagerProvider:
           StreamVideoPushNotificationManager.create(
@@ -66,6 +94,7 @@ class StreamRingService {
         androidPushProvider:
             StreamVideoPushProvider.firebase(name: providerNames.firebase),
         registerApnDeviceToken: true,
+        pushConfiguration: _ringPushConfig,
       ),
     );
 
@@ -77,10 +106,114 @@ class StreamRingService {
     _active = true;
   }
 
-  /// Forwards a background/terminated FCM data message to the SDK so it can
-  /// raise the native incoming-call UI. Returns true if the SDK consumed it.
-  Future<bool> handleBackgroundFcm(Map<String, dynamic> data) {
+  /// Forwards a FOREGROUND FCM data message to the live SDK so it can raise the
+  /// native incoming-call UI. Requires [StreamVideo.instance] to already exist
+  /// (i.e. ring registration ran in this isolate). For the background/terminated
+  /// isolate use [handleBackgroundPush] instead.
+  Future<bool> handleBackgroundFcm(Map<String, dynamic> data) async {
+    // A previous call may have left the device in communication mode, which
+    // would duck this ring to near silence. Restore the loud-ring media policy
+    // before raising the incoming-call UI.
+    await restoreRingAudioPolicy();
     return StreamVideo.instance.handleRingingFlowNotifications(data);
+  }
+
+  /// Restores the loud-ring audio configuration ([ViewerAudioPolicy], media
+  /// playback / `MODE_NORMAL`).
+  ///
+  /// A live call switches the device into communication mode
+  /// ([BroadcasterAudioPolicy]) for echo cancellation and earpiece routing.
+  /// Because the ring connection is kept alive across calls (we never
+  /// `StreamVideo.reset` while ringing is active), that communication mode would
+  /// otherwise linger and DUCK the next incoming ring. Call this on call
+  /// teardown and before showing a ring. No-op when ringing isn't active in this
+  /// isolate; best-effort (a failure only degrades ring loudness).
+  Future<void> restoreRingAudioPolicy() async {
+    if (!_active) return;
+    try {
+      await RtcMediaDeviceNotifier.instance
+          .reinitializeAudioConfiguration(const ViewerAudioPolicy());
+    } catch (e) {
+      debugPrint('StreamRingService: restoring ring audio policy failed: $e');
+    }
+  }
+
+  /// Canonical terminated/background-isolate ring handler (per Stream docs).
+  ///
+  /// A fresh FCM background isolate has NO [StreamVideo.instance], so we
+  /// CREATE a standalone instance (with the push manager), connect it, observe
+  /// the core ringing events, arrange disposal after the ring resolves, then
+  /// hand the payload to the SDK which raises the native incoming-call UI.
+  ///
+  /// Callers (the app's `@pragma('vm:entry-point')` FCM handler) must supply
+  /// everything from persisted storage, since `F.*`/Riverpod are unavailable in
+  /// the background isolate.
+  Future<bool> handleBackgroundPush({
+    required String apiKey,
+    required VideoUser user,
+    required TokenProvider tokenProvider,
+    required StreamRingProviderNames providerNames,
+    required Map<String, dynamic> data,
+  }) async {
+    if (data['sender'] != 'stream.video') return false;
+
+    // Fire-and-forget connect (cascade `..connect()`) per Stream docs — do NOT
+    // `await` it: a cold-start connect can take several seconds, and awaiting it
+    // would block the incoming-call display below until it completes (causing
+    // the ring to auto-cancel before CallKit ever shows).
+    final sv = StreamVideo.create(
+      apiKey,
+      user: User.regular(userId: user.id, name: user.name, image: user.image),
+      // ViewerAudioPolicy (media, MODE_NORMAL) so constructing this background
+      // ring-reception SDK does NOT switch the device into communication mode,
+      // which would duck the incoming-call ringtone. See register() for detail.
+      options: StreamVideoOptions(
+        audioConfigurationPolicy: const ViewerAudioPolicy(),
+      ),
+      tokenLoader: (_) => tokenProvider(),
+      pushNotificationManagerProvider:
+          StreamVideoPushNotificationManager.create(
+        iosPushProvider:
+            StreamVideoPushProvider.apn(name: providerNames.apnVoip),
+        androidPushProvider:
+            StreamVideoPushProvider.firebase(name: providerNames.firebase),
+        registerApnDeviceToken: true,
+        pushConfiguration: _ringPushConfig,
+      ),
+    )..connect();
+
+    // Observe incoming/declined ring events, and dispose the standalone SDK
+    // once the ring is resolved (accept/decline/timeout/ended).
+    final sub = sv.observeCoreRingingEventsForBackground();
+    sv.disposeAfterResolvingRinging(disposingCallback: sub.dispose);
+
+    final type = data['type'] as String?;
+    final callCid = data['call_cid'] as String?;
+    final manager = sv.pushNotificationManager;
+
+    // INSTANT SHOW: for a ring, raise the native incoming-call UI immediately
+    // from the push payload — no network / getCallRingingState round-trip. In an
+    // OS-throttled FCM background isolate the coordinator connect can take ~30s,
+    // so gating the display on it (as handleRingingFlowNotifications does) makes
+    // the ring miss its own window. The `..connect()` + observers above still
+    // run so Accept can join the call.
+    if (type == 'call.ring' && callCid != null && manager != null) {
+      final displayName = data['call_display_name'] as String?;
+      final createdByName = data['created_by_display_name'] as String?;
+      await manager.showIncomingCall(
+        uuid: const Uuid().v4(),
+        callCid: callCid,
+        callerName: (displayName != null && displayName.isNotEmpty)
+            ? displayName
+            : createdByName,
+        handle: data['created_by_id'] as String?,
+        hasVideo: data['video'] == 'true',
+      );
+      return true;
+    }
+
+    // Missed calls (and anything else) go through the standard handler.
+    return sv.handleRingingFlowNotifications(data);
   }
 
   /// Subscribes to "ring accepted"; the callback receives the accepted [Call].
@@ -89,6 +222,27 @@ class StreamRingService {
   ) {
     return StreamVideo.instance
         .observeCallAcceptRingingEvent(onCallAccepted: onAccept);
+  }
+
+  /// Wires Accept handling so the app can navigate into the call when the user
+  /// accepts the incoming ring. Covers BOTH states:
+  ///  - app alive when Accept is tapped → [observeCallAcceptRingingEvent]
+  ///  - app cold-started by tapping Accept → [consumeAndAcceptActiveCall]
+  /// The SDK consumes + joins the call; [onAccepted] receives its call id so the
+  /// host app can show the call screen. Requires [register] to have run.
+  void wireAcceptHandling(void Function(String callId) onAccepted) {
+    StreamVideo.instance.observeCallAcceptRingingEvent(
+      onCallAccepted: (call) => onAccepted(call.id),
+    );
+    // Cold-start: an Accept tap that launched the app leaves an already-accepted
+    // CallKit call to consume.
+    unawaited(
+      StreamVideo.instance
+          .consumeAndAcceptActiveCall(
+            onCallAccepted: (call) => onAccepted(call.id),
+          )
+          .catchError((Object _) => false),
+    );
   }
 
   /// Tears down the long-lived connection (e.g. on logout).
