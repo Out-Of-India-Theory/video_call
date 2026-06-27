@@ -347,6 +347,23 @@ class ActiveCallController extends ChangeNotifier {
     return true;
   }
 
+  /// Sends a ring to [userIds] on the LIVE call — they must already be call
+  /// members. Used for the mitra "Ring customer" re-ring (Flow B): the consumer
+  /// is a member of the consultation call, so this nudges them with a fresh
+  /// incoming-call push. No-op when there is no connected call or [userIds] is
+  /// empty. Returns true on success.
+  Future<bool> ringUsers(List<String> userIds, {bool video = false}) async {
+    final call = _state.call;
+    if (call == null || userIds.isEmpty) return false;
+    final result = await call.ring(userIds: userIds, video: video);
+    if (result.isFailure) {
+      debugPrint(
+          'ActiveCallController.ringUsers failed: ${(result as Failure).error}');
+      return false;
+    }
+    return true;
+  }
+
   /// Permanent end. Tears down the SDK call, resets state, notifies.
   ///
   /// When [forEveryone] is true, attempts to terminate the call for **all**
