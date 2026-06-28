@@ -202,6 +202,17 @@ class OitVideoCall {
     StreamRingService.instance.wireAcceptHandling(onAccepted);
   }
 
+  /// Whether the native call UI currently holds ANY incoming/active call — the
+  /// signal that the app may have been cold-started / woken by a ring. Lets the
+  /// host register the ring service EARLY on a cold start (before its normal
+  /// startup/eligibility gate) so the consume runs within the call's lifetime.
+  /// Checks `isNotEmpty` (not the per-call `isAccepted` flag, which lags the
+  /// cold launch on iOS) — see [StreamRingService.hasPendingCall]. Standalone:
+  /// needs no prior [registerRinging] and no on-demand module.
+  static Future<bool> hasPendingCall() {
+    return StreamRingService.instance.hasPendingCall();
+  }
+
   /// Whether the long-lived ring connection is active.
   static bool get isRingingRegistered => StreamRingService.instance.isActive;
 

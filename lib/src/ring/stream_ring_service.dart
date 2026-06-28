@@ -6,6 +6,9 @@ import 'package:flutter/foundation.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart'
     hide TokenProvider;
 import 'package:stream_video_push_notification/stream_video_push_notification.dart';
+// The platform interface isn't re-exported by the package barrel; import it
+// directly for the standalone [hasPendingAcceptedCall] native-call probe.
+import 'package:stream_video_push_notification/stream_video_push_notification_platform_interface.dart';
 import 'package:uuid/uuid.dart';
 
 import '../config.dart';
@@ -222,6 +225,37 @@ class StreamRingService {
   ) {
     return StreamVideo.instance
         .observeCallAcceptRingingEvent(onCallAccepted: onAccept);
+  }
+
+  /// Whether the native incoming-call layer (CallKit on iOS,
+  /// ConnectionService on Android) currently holds ANY call — the signal that
+  /// the app may have been cold-started / woken by an incoming ring and should
+  /// register the ring service NOW to consume + join it.
+  ///
+  /// Deliberately checks `isNotEmpty`, NOT a per-call `isAccepted` flag: this
+  /// mirrors the SDK's own cold-start handling
+  /// ([StreamVideoPushNotificationManager] keys off
+  /// `activeCalls().isNotEmpty`), and on iOS the native `isAccepted` flag lags
+  /// the cold launch — it isn't yet true the instant the app boots, so gating
+  /// on it misses the call. Once the ring service is registered, its Accept
+  /// handling (`observeCallAcceptRingingEvent` + the polled
+  /// `consumeAndAcceptActiveCall`, which DOES filter `isAccepted`) catches the
+  /// accept as soon as the flag flips.
+  ///
+  /// Reads the native call list directly through the push-notification platform
+  /// channel (the same source [StreamVideo.consumeAndAcceptActiveCall] uses),
+  /// so it works at the very start of app launch WITHOUT a constructed
+  /// [StreamVideo] / live ring connection — and WITHOUT downloading the
+  /// on-demand video module. Best-effort: any failure (plugin not yet
+  /// registered, off-mobile, malformed payload) yields false.
+  Future<bool> hasPendingCall() async {
+    try {
+      final raw =
+          await StreamVideoPushNotificationPlatform.instance.activeCalls();
+      return raw is List && raw.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Wires Accept handling so the app can navigate into the call when the user
