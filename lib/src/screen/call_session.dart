@@ -94,6 +94,18 @@ class StreamCallSession implements CallSession {
     StreamVideo(apiKey, user: user, userToken: token);
   }
 
+  /// Returns the call already active in this process for [cid], if any — e.g.
+  /// one the accept flow (iOS CallKit / Android FCM) joined, or started
+  /// joining, before a screen-level join runs. Reusing it avoids the SDK
+  /// rejecting a duplicate join with "a call with the same cid is in progress"
+  /// and ensures the UI renders the call that is actually connecting.
+  Call? _activeCallFor(StreamCallCid cid) {
+    for (final active in StreamVideo.instance.state.activeCalls.value) {
+      if (active.callCid == cid) return active;
+    }
+    return null;
+  }
+
   @override
   Future<Call> getCall({
     required String callType,
@@ -104,6 +116,8 @@ class StreamCallSession implements CallSession {
       id: callId,
       preferences: _callAudioPreferences(),
     );
+    final existing = _activeCallFor(call.callCid);
+    if (existing != null) return existing;
     final result = await call.get();
     if (result.isFailure) {
       final failure = result as Failure;
@@ -125,6 +139,8 @@ class StreamCallSession implements CallSession {
       id: callId,
       preferences: _callAudioPreferences(),
     );
+    final existing = _activeCallFor(call.callCid);
+    if (existing != null) return existing;
     final result = await call.getOrCreate();
     if (result.isFailure) {
       final failure = result as Failure;
@@ -135,6 +151,13 @@ class StreamCallSession implements CallSession {
 
   @override
   Future<void> joinCall(Call call) async {
+    // The accept flow (iOS CallKit / Android FCM) joins the call before this
+    // screen-level auto-join runs, so it may already be active. The SDK rejects
+    // a second join() on an active cid ("a call with the same cid is in
+    // progress") while the in-flight join connects on its own — so skip the
+    // redundant join. Paired with getCall/getOrCreateCall returning that active
+    // call, the UI renders it as it connects (no spurious "retry" prompt).
+    if (_activeCallFor(call.callCid) != null) return;
     // Audio policy for the live call (Broadcaster: echo cancellation +
     // communication-mode routing) is set via the call PREFERENCE in
     // getCall/getOrCreateCall, which wins over the Viewer policy the reused
