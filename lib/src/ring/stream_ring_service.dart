@@ -231,18 +231,39 @@ class StreamRingService {
   /// The SDK consumes + joins the call; [onAccepted] receives its call id so the
   /// host app can show the call screen. Requires [register] to have run.
   void wireAcceptHandling(void Function(String callId) onAccepted) {
-    StreamVideo.instance.observeCallAcceptRingingEvent(
-      onCallAccepted: (call) => onAccepted(call.id),
-    );
+    var handled = false;
+    void deliver(Call call) {
+      if (handled) return;
+      handled = true;
+      onAccepted(call.id);
+    }
+
+    StreamVideo.instance.observeCallAcceptRingingEvent(onCallAccepted: deliver);
+
     // Cold-start: an Accept tap that launched the app leaves an already-accepted
-    // CallKit call to consume.
-    unawaited(
-      StreamVideo.instance
-          .consumeAndAcceptActiveCall(
-            onCallAccepted: (call) => onAccepted(call.id),
-          )
-          .catchError((Object _) => false),
-    );
+    // CallKit call to consume — but it may NOT be consumable the instant we
+    // register (the app is still booting and the SDK still connecting), so a
+    // single consumeAndAcceptActiveCall can miss it (lands on home, no nav).
+    // Poll until the accepted call surfaces (or a bounded timeout).
+    void tryConsume() {
+      if (handled) return;
+      unawaited(
+        StreamVideo.instance
+            .consumeAndAcceptActiveCall(onCallAccepted: deliver)
+            .catchError((Object _) => false),
+      );
+    }
+
+    tryConsume();
+    var attempts = 1;
+    Timer.periodic(const Duration(seconds: 1), (t) {
+      attempts++;
+      if (handled || attempts > 12) {
+        t.cancel();
+        return;
+      }
+      tryConsume();
+    });
   }
 
   /// Tears down the long-lived connection (e.g. on logout).
