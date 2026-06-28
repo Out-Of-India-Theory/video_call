@@ -216,9 +216,18 @@ class OitVideoCall {
   /// Whether the long-lived ring connection is active.
   static bool get isRingingRegistered => StreamRingService.instance.isActive;
 
-  /// Tears down the ring connection (call on logout).
-  static Future<void> unregisterRinging() {
-    return StreamRingService.instance.unregister();
+  /// Tears down the ring connection AND deletes this device's push token(s)
+  /// from Stream — call on LOGOUT so the logged-out device stops receiving
+  /// rings for the old user. (Plain disconnect/reset leaves the device token
+  /// registered on Stream, which is why a logged-out device kept ringing.)
+  ///
+  /// iOS VoIP + APN tokens are deleted automatically. [fcmToken] is the Android
+  /// FCM token, which the SDK cannot read on its own (the plugin's token
+  /// provider is not exported) — the host app supplies it via
+  /// `FirebaseMessaging.instance.getToken()`. Best-effort: cleanup failures
+  /// never block logout. No-op if ringing was never registered this session.
+  static Future<void> unregisterRinging({String? fcmToken}) {
+    return StreamRingService.instance.unregister(fcmToken: fcmToken);
   }
 
   /// Rings [userIds] on the ACTIVE call — the mitra "Ring customer" re-ring

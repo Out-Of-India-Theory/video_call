@@ -301,9 +301,31 @@ class StreamRingService {
   }
 
   /// Tears down the long-lived connection (e.g. on logout).
-  Future<void> unregister() async {
+  Future<void> unregister({String? fcmToken}) async {
     if (!_active) return;
     _active = false;
+    // Delete this device's push token(s) from Stream BEFORE reset, so a
+    // logged-out device stops receiving rings for the old user.
+    // `reset(disconnect: true)` only drops the socket — it leaves the device
+    // REGISTERED on Stream (the cause of the logged-out-device-still-rings bug).
+    // Best-effort: never let cleanup failures block logout.
+    try {
+      // iOS VoIP + APN tokens (the push manager knows them). On Android this is
+      // a no-op (getDevicePushTokenVoIP returns "" there).
+      await StreamVideo.instance.pushNotificationManager?.unregisterDevice();
+    } catch (e) {
+      debugPrint('StreamRingService.unregister: unregisterDevice failed: $e');
+    }
+    if (fcmToken != null && fcmToken.isNotEmpty) {
+      // Android FCM token — NOT covered by unregisterDevice (which deletes
+      // VoIP/APN only). The host app supplies it (the SDK can't read it: the
+      // plugin's StreamTokenProvider is hidden from its exports).
+      try {
+        await StreamVideo.instance.removeDevice(pushToken: fcmToken);
+      } catch (e) {
+        debugPrint('StreamRingService.unregister: removeDevice(fcm) failed: $e');
+      }
+    }
     await StreamVideo.reset(disconnect: true);
   }
 }
