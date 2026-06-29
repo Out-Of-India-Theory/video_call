@@ -382,16 +382,38 @@ class StreamRingService {
 
   /// Watches the accepted [call] and re-arms [_arming] the moment it
   /// disconnects, so the next ring of the same cid is delivered again. Replaces
-  /// any prior watch (only one accept is ever in flight). `isDisconnected` is
-  /// the same call-ended signal [ActiveCallController] keys off.
+  /// any prior watch (only one accept is ever in flight).
   void _watchAcceptedCallEnd(Call call) {
     _acceptedCallSub?.cancel();
-    _acceptedCallSub = call.state.listen((state) {
-      if (!state.status.isDisconnected) return;
+    _acceptedCallSub = watchCallEnd(call, () {
       _arming.callEnded(call.id);
-      _acceptedCallSub?.cancel();
       _acceptedCallSub = null;
     });
+  }
+
+  /// Subscribes to [call]'s state and invokes [onEnded] exactly once — the
+  /// first time the call reports `isDisconnected` — then cancels the
+  /// subscription.
+  ///
+  /// Extracted + [visibleForTesting] so the re-arm wiring ([_watchAcceptedCallEnd])
+  /// is covered without the [StreamVideo] singleton: the #5205 fix hinges on
+  /// this listener firing once at call end. `isDisconnected` is the same
+  /// call-ended signal [ActiveCallController] keys off; transient
+  /// connecting/reconnecting states don't match (no false re-arm mid-call), and
+  /// the call is never disconnected at subscribe time (it was just accepted),
+  /// so the self-cancel only runs on a later async event.
+  @visibleForTesting
+  static StreamSubscription<CallState> watchCallEnd(
+    Call call,
+    void Function() onEnded,
+  ) {
+    late final StreamSubscription<CallState> sub;
+    sub = call.state.listen((state) {
+      if (!state.status.isDisconnected) return;
+      onEnded();
+      unawaited(sub.cancel());
+    });
+    return sub;
   }
 
   /// Tears down the long-lived connection (e.g. on logout).

@@ -1,5 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:oit_video_call/src/ring/stream_ring_service.dart';
+import 'package:stream_video_flutter/stream_video_flutter.dart';
+
+import '../screen/fake_call_session.dart';
 
 void main() {
   group('AcceptArming', () {
@@ -49,6 +52,32 @@ void main() {
       a.reset();
       expect(a.hasInFlight, isFalse);
       expect(a.shouldDeliver('order-1'), isTrue);
+    });
+  });
+
+  group('watchCallEnd — re-arm wiring (#5205)', () {
+    // The whole #5205 fix hinges on this listener firing exactly once when the
+    // accepted call disconnects. Drives the REAL call.state.listen path with
+    // the existing FakeCallSession fake Call (sync broadcast emitter).
+    test('fires onEnded once on disconnect, ignores connected, self-cancels',
+        () async {
+      final session = FakeCallSession();
+      final call = await session.getCall(callType: 'default', callId: 'order-1');
+      var ended = 0;
+      final sub = StreamRingService.watchCallEnd(call, () => ended++);
+      addTearDown(sub.cancel);
+
+      // Non-terminal transition must NOT re-arm.
+      session.pushCallStatus(CallStatus.connected());
+      expect(ended, 0);
+
+      // First disconnect fires exactly once.
+      session.pushCallStatus(CallStatus.disconnected(DisconnectReason.ended()));
+      expect(ended, 1);
+
+      // Subscription self-cancelled — a later disconnect does nothing.
+      session.pushCallStatus(CallStatus.disconnected(DisconnectReason.ended()));
+      expect(ended, 1);
     });
   });
 }
