@@ -58,12 +58,15 @@ class StreamAudioRouter implements AudioRouter {
       // device list first, then follow subsequent plug/unplug/pair events.
       _deviceSub = notifier.onDeviceChange.listen(
         _applyForDevices,
-        onError: (Object _) {}, // ignore device-enumeration errors
+        onError: (Object e) =>
+            debugPrint('[oit_video_call] AudioRouter.onDeviceChange error: $e'),
       );
       final outputs = (await notifier.audioOutputs()).getDataOrNull();
-      if (outputs != null) _applyForDevices(outputs);
-    } catch (_) {
-      // Swallow — no device management available on this platform/host.
+      if (outputs != null) await _applyForDevices(outputs);
+    } catch (e, st) {
+      // Best-effort: a host without the WebRTC device notifier (e.g. a
+      // unit-test environment) must never break the call.
+      debugPrint('[oit_video_call] AudioRouter.attach failed: $e\n$st');
     }
   }
 
@@ -80,14 +83,36 @@ class StreamAudioRouter implements AudioRouter {
     if (sub != null) unawaited(sub.cancel());
   }
 
-  void _applyForDevices(List<RtcMediaDevice> devices) {
+  Future<void> _applyForDevices(List<RtcMediaDevice> devices) async {
     final call = _call;
     if (call == null) return;
     final target = selectAudioOutput(devices);
     if (target == null || target.id == _appliedDeviceId) return;
+    // iOS auto-routes to a connected external (wired/Bluetooth) device, and the
+    // SDK itself avoids forcing it there: `Call._applyDefaultAudioOutput` nulls
+    // the default output for an iOS external device ("trust the OS to set it as
+    // default" — stream_video 1.4.1 call.dart). Forcing `setAudioOutputDevice`
+    // on iOS would reconfigure the AVAudioSession against that design. The real
+    // gap this router fills is Android, where the OS does NOT auto-switch
+    // mid-call. (Speaker/earpiece is still applied on iOS — the SDK sets those
+    // too; only the external case is OS-owned.)
+    if (!kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.iOS &&
+        target.isExternal) {
+      return;
+    }
+    final result = await call.setAudioOutputDevice(target);
+    if (result.isFailure) {
+      // Leave `_appliedDeviceId` unset so the next device-change event retries.
+      // A transient failure while a headset is mid-negotiation must not strand
+      // the route permanently (that would re-create dharmayana_app#4957).
+      debugPrint(
+        '[oit_video_call] AudioRouter.setAudioOutputDevice(${target.id}) '
+        'failed: ${(result as Failure).error}',
+      );
+      return;
+    }
     _appliedDeviceId = target.id;
-    // Best-effort; if it fails, the next device-change event retries.
-    unawaited(call.setAudioOutputDevice(target));
   }
 }
 
