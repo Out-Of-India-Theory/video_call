@@ -373,7 +373,10 @@ class ActiveCallController extends ChangeNotifier {
     final call = _state.call;
     if (call == null) return false;
     final s = call.state.value;
-    final selfId = StreamVideo.instance.currentUser.id;
+    // Read self from the call state (not the StreamVideo.instance singleton) so
+    // this stays session-driven + unit-testable, mirroring CallState's own
+    // ringingMembers (member.userId != currentUserId).
+    final selfId = s.currentUserId;
     final connected = s.callParticipants.map((p) => p.userId).toSet();
     final absent = s.callMembers
         .map((m) => m.userId)
