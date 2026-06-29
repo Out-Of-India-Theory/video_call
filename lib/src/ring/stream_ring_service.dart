@@ -58,6 +58,16 @@ class StreamRingService {
   Timer? _consumeTimer;
   bool _acceptWired = false;
 
+  /// Per-accept delivery guard. Dedupes the observer + cold-start consume poll
+  /// for ONE accept, but RE-ARMS when that call ends so a later ring of the
+  /// SAME consultation cid is delivered again (issue #5205). See [AcceptArming].
+  final AcceptArming _arming = AcceptArming();
+
+  /// Watches the currently-accepted call so [_arming] can re-arm the moment it
+  /// disconnects. Only ever one at a time (a new accept can't be delivered
+  /// while one is in flight); torn down in [unregister].
+  StreamSubscription<CallState>? _acceptedCallSub;
+
   /// True once [register] has constructed + connected the long-lived SDK.
   ///
   /// [StreamCallSession] reads this to (a) REUSE the connection instead of
@@ -319,10 +329,14 @@ class StreamRingService {
       audioConfigurationPolicy: const BroadcasterAudioPolicy(),
     );
 
-    var handled = false;
     void deliver(Call call) {
-      if (handled) return;
-      handled = true;
+      // Dedupes the two delivery mechanisms (observer + consume poll) for ONE
+      // accept. Unlike the prior process-lifetime latch, [AcceptArming] RE-ARMS
+      // when the accepted call ends, so a later ring of the SAME consultation
+      // cid (server T-5/T+2 re-ring, mitra "Ring customer") navigates again
+      // instead of being silently dropped (#5205).
+      if (!_arming.shouldDeliver(call.id)) return;
+      _watchAcceptedCallEnd(call);
       onAccepted(call.id);
     }
 
@@ -337,11 +351,11 @@ class StreamRingService {
     // single consumeAndAcceptActiveCall can miss it (lands on home, no nav).
     // Poll until the accepted call surfaces (or a bounded timeout).
     void tryConsume() {
-      // Bail once the accept is handled or the service has been unregistered:
+      // Bail once an accept is in flight or the service has been unregistered:
       // after unregister() calls StreamVideo.reset() the synchronous
       // StreamVideo.instance getter THROWS, and `.catchError` only guards the
       // returned Future, not that sync access — so guard it explicitly.
-      if (handled || !_active) return;
+      if (_arming.hasInFlight || !_active) return;
       try {
         unawaited(
           StreamVideo.instance
@@ -358,12 +372,48 @@ class StreamRingService {
     var attempts = 1;
     _consumeTimer = Timer.periodic(const Duration(seconds: 1), (t) {
       attempts++;
-      if (handled || attempts > 12) {
+      if (_arming.hasInFlight || attempts > 12) {
         t.cancel();
         return;
       }
       tryConsume();
     });
+  }
+
+  /// Watches the accepted [call] and re-arms [_arming] the moment it
+  /// disconnects, so the next ring of the same cid is delivered again. Replaces
+  /// any prior watch (only one accept is ever in flight).
+  void _watchAcceptedCallEnd(Call call) {
+    _acceptedCallSub?.cancel();
+    _acceptedCallSub = watchCallEnd(call, () {
+      _arming.callEnded(call.id);
+      _acceptedCallSub = null;
+    });
+  }
+
+  /// Subscribes to [call]'s state and invokes [onEnded] exactly once — the
+  /// first time the call reports `isDisconnected` — then cancels the
+  /// subscription.
+  ///
+  /// Extracted + [visibleForTesting] so the re-arm wiring ([_watchAcceptedCallEnd])
+  /// is covered without the [StreamVideo] singleton: the #5205 fix hinges on
+  /// this listener firing once at call end. `isDisconnected` is the same
+  /// call-ended signal [ActiveCallController] keys off; transient
+  /// connecting/reconnecting states don't match (no false re-arm mid-call), and
+  /// the call is never disconnected at subscribe time (it was just accepted),
+  /// so the self-cancel only runs on a later async event.
+  @visibleForTesting
+  static StreamSubscription<CallState> watchCallEnd(
+    Call call,
+    void Function() onEnded,
+  ) {
+    late final StreamSubscription<CallState> sub;
+    sub = call.state.listen((state) {
+      if (!state.status.isDisconnected) return;
+      onEnded();
+      unawaited(sub.cancel());
+    });
+    return sub;
   }
 
   /// Tears down the long-lived connection (e.g. on logout).
@@ -398,7 +448,48 @@ class StreamRingService {
     _consumeTimer = null;
     await _acceptSub?.cancel();
     _acceptSub = null;
+    await _acceptedCallSub?.cancel();
+    _acceptedCallSub = null;
+    _arming.reset();
     _acceptWired = false;
     await StreamVideo.reset(disconnect: true);
   }
+}
+
+/// Decides whether an incoming "ring accepted" should be delivered to the host
+/// app (which navigates into the call).
+///
+/// Two SDK mechanisms can report the SAME accept — the live
+/// `observeCallAcceptRingingEvent` observer and the cold-start
+/// `consumeAndAcceptActiveCall` poll — so a "deliver once" guard is needed to
+/// avoid double-navigation. Crucially that guard must RE-ARM when the accepted
+/// call ends: a consultation reuses ONE call cid (`default:<orderId>`) across
+/// rings (server T-5, server/mitra T+2 re-ring), so a process-lifetime latch
+/// dropped every accept after the first and the app never navigated into the
+/// rejoined call (issue #5205). Pure + synchronous so it is unit-testable
+/// without the `StreamVideo` singleton.
+@visibleForTesting
+class AcceptArming {
+  String? _inFlightCallId;
+
+  /// True while an accept has been delivered but its call hasn't ended yet.
+  bool get hasInFlight => _inFlightCallId != null;
+
+  /// Returns true the first time an accept should be delivered; false for a
+  /// duplicate report of the in-flight accept (or any accept while one is
+  /// already in flight). Re-arm via [callEnded].
+  bool shouldDeliver(String callId) {
+    if (_inFlightCallId != null) return false;
+    _inFlightCallId = callId;
+    return true;
+  }
+
+  /// Re-arms once the in-flight call ends so a later ring of the same cid is
+  /// delivered again. No-op for a stale/mismatched id.
+  void callEnded(String callId) {
+    if (_inFlightCallId == callId) _inFlightCallId = null;
+  }
+
+  /// Full reset (teardown / unregister).
+  void reset() => _inFlightCallId = null;
 }
