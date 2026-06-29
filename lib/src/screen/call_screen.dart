@@ -351,28 +351,28 @@ class _CallScreenState extends State<CallScreen> {
               onBackPressed: _onBackPressed,
               onLeaveCallTap: () => unawaited(_onLeaveCallTap()),
               onCallDisconnected: _onCallDisconnected,
-              // On web, override the default controls bar to drop the
-              // speakerphone toggle and flip-camera button. Stream's
-              // implementations are documented as Android/iOS only — on web
-              // they render but their handlers no-op (browsers don't expose
-              // earpiece/speaker output routing, and `Call.flipCamera`
-              // bridges to mobile WebRTC switchCamera). Mobile keeps Stream's
-              // defaults.
-              callContentWidgetBuilder: kIsWeb
-                  ? (context, call) => StreamCallContent(
-                        call: call,
-                        onBackPressed: _onBackPressed,
-                        onLeaveCallTap: () => unawaited(_onLeaveCallTap()),
-                        pictureInPictureConfiguration:
-                            const PictureInPictureConfiguration(
-                          enablePictureInPicture: true,
-                        ),
-                        callControlsWidgetBuilder: (_, call) =>
-                            StreamCallControls(
-                          options: webCallControlOptions(call: call),
-                        ),
-                      )
-                  : null,
+              // Override the default controls bar to drop the speakerphone
+              // toggle on every platform. Audio output is now managed
+              // automatically by [StreamAudioRouter] (connected headset, else
+              // loudspeaker), so a manual speaker toggle is redundant and was
+              // confusing — its "off" position routed to a plugged-in headset,
+              // reading as an output switch (dharmayana_app#4957). On web we
+              // also drop flip-camera (Stream's impl bridges to mobile WebRTC
+              // switchCamera and no-ops in browsers); mobile keeps it.
+              callContentWidgetBuilder: (context, call) => StreamCallContent(
+                call: call,
+                onBackPressed: _onBackPressed,
+                onLeaveCallTap: () => unawaited(_onLeaveCallTap()),
+                pictureInPictureConfiguration:
+                    const PictureInPictureConfiguration(
+                  enablePictureInPicture: true,
+                ),
+                callControlsWidgetBuilder: (_, call) => StreamCallControls(
+                  options: kIsWeb
+                      ? webCallControlOptions(call: call)
+                      : mobileCallControlOptions(call: call),
+                ),
+              ),
             ),
             // Offset by status bar + Material AppBar height so the banner sits just below
             // Stream's CallAppBar instead of overlapping the back/leave controls.
@@ -411,4 +411,16 @@ class _CallScreenState extends State<CallScreen> {
 List<Widget> webCallControlOptions({required Call call}) => [
       ToggleCameraOption(call: call),
       ToggleMicrophoneOption(call: call),
+    ];
+
+/// Mobile call control bar — Stream's default option set
+/// ([defaultCallControlOptions]) minus the speakerphone toggle. Audio output
+/// is managed automatically by [StreamAudioRouter] (connected headset, else
+/// loudspeaker), so the manual toggle is redundant (dharmayana_app#4957).
+/// Flip-camera is kept — it's functional on mobile.
+@visibleForTesting
+List<Widget> mobileCallControlOptions({required Call call}) => [
+      ToggleCameraOption(call: call),
+      ToggleMicrophoneOption(call: call),
+      FlipCameraOption(call: call),
     ];

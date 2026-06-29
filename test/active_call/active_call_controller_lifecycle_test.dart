@@ -9,6 +9,7 @@ import 'package:oit_video_call/src/models/video_user.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
 
 import '../screen/fake_call_session.dart';
+import 'fake_audio_router.dart';
 
 void main() {
   group('ActiveCallController.connectAndJoin', () {
@@ -18,7 +19,7 @@ void main() {
 
     setUp(() {
       session = FakeCallSession();
-      controller = ActiveCallController(session: session);
+      controller = ActiveCallController(session: session, audioRouter: FakeAudioRouter());
       config = OitVideoCallConfig(
         apiKey: 'k',
         user: const VideoUser(id: 'u', name: 'U'),
@@ -392,7 +393,7 @@ void main() {
 
     setUp(() {
       session = FakeCallSession();
-      controller = ActiveCallController(session: session);
+      controller = ActiveCallController(session: session, audioRouter: FakeAudioRouter());
       config = OitVideoCallConfig(
         apiKey: 'k',
         user: const VideoUser(id: 'u', name: 'U'),
