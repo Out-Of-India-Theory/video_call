@@ -1,8 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+
 import 'active_call/active_call_controller.dart';
 import 'config.dart';
 import 'errors.dart';
 import 'models/video_user.dart';
+import 'ring/stream_ring_config.dart';
+import 'ring/stream_ring_service.dart';
 import 'screen/call_screen.dart';
 import 'screen/error_view.dart';
 
@@ -135,6 +140,103 @@ class OitVideoCall {
   /// is already idle.
   static Future<void> endCall({bool forEveryone = false}) async {
     await _controller?.endCall(forEveryone: forEveryone);
+  }
+
+  /// Registers the long-lived ring connection so this device receives
+  /// server-initiated call rings (Flow A) and re-rings (Flow B) while the app
+  /// is foregrounded, backgrounded, or killed. Call once at startup for
+  /// eligible users (those with an upcoming consultation). Idempotent.
+  static Future<void> registerRinging({
+    required String apiKey,
+    required VideoUser user,
+    required TokenProvider tokenProvider,
+    required StreamRingProviderNames providerNames,
+  }) {
+    return StreamRingService.instance.register(
+      apiKey: apiKey,
+      user: user,
+      tokenProvider: tokenProvider,
+      providerNames: providerNames,
+    );
+  }
+
+  /// Forwards a FOREGROUND FCM data message to the live SDK (requires ring
+  /// registration to have run in this isolate). Returns true if consumed.
+  static Future<bool> handleBackgroundRingPush(Map<String, dynamic> data) {
+    return StreamRingService.instance.handleBackgroundFcm(data);
+  }
+
+  /// Canonical terminated/background-isolate ring handler (per Stream docs):
+  /// creates a standalone [StreamVideo] with the push manager, connects,
+  /// observes core ringing events, and raises the native incoming-call UI.
+  /// Call from the app's top-level `@pragma('vm:entry-point')` FCM handler with
+  /// values read from persisted storage (F.*/Riverpod are unavailable there).
+  static Future<bool> handleBackgroundPush({
+    required String apiKey,
+    required VideoUser user,
+    required TokenProvider tokenProvider,
+    required StreamRingProviderNames providerNames,
+    required Map<String, dynamic> data,
+  }) {
+    return StreamRingService.instance.handleBackgroundPush(
+      apiKey: apiKey,
+      user: user,
+      tokenProvider: tokenProvider,
+      providerNames: providerNames,
+      data: data,
+    );
+  }
+
+  /// Subscribes to "ring accepted"; [onAccept] receives the accepted call id.
+  static StreamSubscription<void>? observeAcceptedRing(
+    void Function(String callId) onAccept,
+  ) {
+    return StreamRingService.instance
+        .observeAccepted((call) => onAccept(call.id));
+  }
+
+  /// Wires Accept handling (app-alive AND cold-started-by-Accept) so the host
+  /// app can navigate into the call. [onAccepted] receives the accepted call id.
+  /// Call once at startup, after [registerRinging].
+  static void wireRingAccept(void Function(String callId) onAccepted) {
+    StreamRingService.instance.wireAcceptHandling(onAccepted);
+  }
+
+  /// Whether the native call UI currently holds ANY incoming/active call — the
+  /// signal that the app may have been cold-started / woken by a ring. Lets the
+  /// host register the ring service EARLY on a cold start (before its normal
+  /// startup/eligibility gate) so the consume runs within the call's lifetime.
+  /// Checks `isNotEmpty` (not the per-call `isAccepted` flag, which lags the
+  /// cold launch on iOS) — see [StreamRingService.hasPendingCall]. Standalone:
+  /// needs no prior [registerRinging] and no on-demand module.
+  static Future<bool> hasPendingCall() {
+    return StreamRingService.instance.hasPendingCall();
+  }
+
+  /// Whether the long-lived ring connection is active.
+  static bool get isRingingRegistered => StreamRingService.instance.isActive;
+
+  /// Tears down the ring connection AND deletes this device's push token(s)
+  /// from Stream — call on LOGOUT so the logged-out device stops receiving
+  /// rings for the old user. (Plain disconnect/reset leaves the device token
+  /// registered on Stream, which is why a logged-out device kept ringing.)
+  ///
+  /// iOS VoIP + APN tokens are deleted automatically. [fcmToken] is the Android
+  /// FCM token, which the SDK cannot read on its own (the plugin's token
+  /// provider is not exported) — the host app supplies it via
+  /// `FirebaseMessaging.instance.getToken()`. Best-effort: cleanup failures
+  /// never block logout. No-op if ringing was never registered this session.
+  static Future<void> unregisterRinging({String? fcmToken}) {
+    return StreamRingService.instance.unregister(fcmToken: fcmToken);
+  }
+
+  /// Rings [userIds] on the ACTIVE call — the mitra "Ring customer" re-ring
+  /// (Flow B), where the consumer is a member of the consultation call but
+  /// hasn't joined yet. No-op when there is no live call. Returns true on
+  /// success.
+  static Future<bool> ringUsers(List<String> userIds, {bool video = true}) {
+    return _controller?.ringUsers(userIds, video: video) ??
+        Future<bool>.value(false);
   }
 
   static Widget callScreen({
