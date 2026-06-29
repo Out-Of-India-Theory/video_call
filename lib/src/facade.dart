@@ -234,7 +234,7 @@ class OitVideoCall {
   /// (Flow B), where the consumer is a member of the consultation call but
   /// hasn't joined yet. No-op when there is no live call. Returns true on
   /// success.
-  static Future<bool> ringUsers(List<String> userIds, {bool video = false}) {
+  static Future<bool> ringUsers(List<String> userIds, {bool video = true}) {
     return _controller?.ringUsers(userIds, video: video) ??
         Future<bool>.value(false);
   }

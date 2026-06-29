@@ -7,7 +7,7 @@ import 'package:stream_video_flutter/stream_video_flutter.dart'
     hide TokenProvider;
 import 'package:stream_video_push_notification/stream_video_push_notification.dart';
 // The platform interface isn't re-exported by the package barrel; import it
-// directly for the standalone [hasPendingAcceptedCall] native-call probe.
+// directly for the standalone [hasPendingCall] native-call probe.
 import 'package:stream_video_push_notification/stream_video_push_notification_platform_interface.dart';
 import 'package:uuid/uuid.dart';
 
@@ -43,6 +43,21 @@ class StreamRingService {
 
   bool _active = false;
 
+  /// In-flight [register] guard: a second concurrent [register] returns this
+  /// same Future instead of constructing a second [StreamVideo] (which throws,
+  /// since `failIfSingletonExists` defaults to true) before `_active` is set.
+  Future<void>? _registering;
+
+  /// Accept-handling state (see [wireAcceptHandling]).
+  ///
+  /// [_acceptSub] is the live "ring accepted" observer, [_consumeTimer] the
+  /// cold-start consume poll, and [_acceptWired] an idempotency guard so a
+  /// second [wireAcceptHandling] can't install duplicate observers/timers
+  /// (which would double-navigate). All are torn down in [unregister].
+  StreamSubscription<ActionCallAccept>? _acceptSub;
+  Timer? _consumeTimer;
+  bool _acceptWired = false;
+
   /// True once [register] has constructed + connected the long-lived SDK.
   ///
   /// [StreamCallSession] reads this to (a) REUSE the connection instead of
@@ -57,7 +72,10 @@ class StreamRingService {
   set debugActive(bool value) => _active = value;
 
   /// Constructs the long-lived [StreamVideo] with the official push manager
-  /// and connects (registering the device for call pushes). Idempotent.
+  /// and connects (registering the device for call pushes). Idempotent, and
+  /// safe against concurrent calls: a second invocation while the first is
+  /// still connecting awaits the same in-flight Future rather than building a
+  /// second [StreamVideo] (which would throw before `_active` flips true).
   Future<void> register({
     required String apiKey,
     required VideoUser user,
@@ -65,7 +83,26 @@ class StreamRingService {
     required StreamRingProviderNames providerNames,
   }) async {
     if (_active) return;
+    if (_registering != null) return _registering;
+    _registering = _doRegister(
+      apiKey: apiKey,
+      user: user,
+      tokenProvider: tokenProvider,
+      providerNames: providerNames,
+    );
+    try {
+      await _registering;
+    } finally {
+      _registering = null;
+    }
+  }
 
+  Future<void> _doRegister({
+    required String apiKey,
+    required VideoUser user,
+    required TokenProvider tokenProvider,
+    required StreamRingProviderNames providerNames,
+  }) async {
     StreamVideo(
       apiKey,
       user: User.regular(
@@ -210,7 +247,10 @@ class StreamRingService {
             ? displayName
             : createdByName,
         handle: data['created_by_id'] as String?,
-        hasVideo: data['video'] == 'true',
+        // Treat a ring as video unless the payload EXPLICITLY disables it
+        // (matches the SDK's showIncomingCall default, and iOS requires a
+        // video ring to foreground the app on accept).
+        hasVideo: data['video'] != 'false',
       );
       return true;
     }
@@ -265,6 +305,20 @@ class StreamRingService {
   /// The SDK consumes + joins the call; [onAccepted] receives its call id so the
   /// host app can show the call screen. Requires [register] to have run.
   void wireAcceptHandling(void Function(String callId) onAccepted) {
+    // Idempotency: a second wireAcceptHandling must not install a second
+    // observer/timer, or an accept would deliver twice → double-navigate.
+    if (_acceptWired) return;
+    _acceptWired = true;
+
+    // Accept the call under the Broadcaster audio policy (communication mode,
+    // AEC/earpiece). The long-lived ring connection runs under
+    // ViewerAudioPolicy (media, no AEC) so the ring plays at full volume; an
+    // accepted-from-ring call must override that per-call or it would join with
+    // the wrong audio routing. See register() / call_session.dart.
+    final acceptPrefs = DefaultCallPreferences(
+      audioConfigurationPolicy: const BroadcasterAudioPolicy(),
+    );
+
     var handled = false;
     void deliver(Call call) {
       if (handled) return;
@@ -272,7 +326,10 @@ class StreamRingService {
       onAccepted(call.id);
     }
 
-    StreamVideo.instance.observeCallAcceptRingingEvent(onCallAccepted: deliver);
+    _acceptSub = StreamVideo.instance.observeCallAcceptRingingEvent(
+      onCallAccepted: deliver,
+      acceptCallPreferences: acceptPrefs,
+    );
 
     // Cold-start: an Accept tap that launched the app leaves an already-accepted
     // CallKit call to consume — but it may NOT be consumable the instant we
@@ -280,17 +337,26 @@ class StreamRingService {
     // single consumeAndAcceptActiveCall can miss it (lands on home, no nav).
     // Poll until the accepted call surfaces (or a bounded timeout).
     void tryConsume() {
-      if (handled) return;
-      unawaited(
-        StreamVideo.instance
-            .consumeAndAcceptActiveCall(onCallAccepted: deliver)
-            .catchError((Object _) => false),
-      );
+      // Bail once the accept is handled or the service has been unregistered:
+      // after unregister() calls StreamVideo.reset() the synchronous
+      // StreamVideo.instance getter THROWS, and `.catchError` only guards the
+      // returned Future, not that sync access — so guard it explicitly.
+      if (handled || !_active) return;
+      try {
+        unawaited(
+          StreamVideo.instance
+              .consumeAndAcceptActiveCall(
+                onCallAccepted: deliver,
+                callPreferences: acceptPrefs,
+              )
+              .catchError((Object _) => false),
+        );
+      } catch (_) {}
     }
 
     tryConsume();
     var attempts = 1;
-    Timer.periodic(const Duration(seconds: 1), (t) {
+    _consumeTimer = Timer.periodic(const Duration(seconds: 1), (t) {
       attempts++;
       if (handled || attempts > 12) {
         t.cancel();
@@ -326,6 +392,13 @@ class StreamRingService {
         debugPrint('StreamRingService.unregister: removeDevice(fcm) failed: $e');
       }
     }
+    // Tear down accept handling BEFORE reset: a still-running consume poll
+    // would otherwise hit StreamVideo.instance after reset wipes the singleton.
+    _consumeTimer?.cancel();
+    _consumeTimer = null;
+    await _acceptSub?.cancel();
+    _acceptSub = null;
+    _acceptWired = false;
     await StreamVideo.reset(disconnect: true);
   }
 }

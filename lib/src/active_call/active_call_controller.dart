@@ -352,7 +352,7 @@ class ActiveCallController extends ChangeNotifier {
   /// is a member of the consultation call, so this nudges them with a fresh
   /// incoming-call push. No-op when there is no connected call or [userIds] is
   /// empty. Returns true on success.
-  Future<bool> ringUsers(List<String> userIds, {bool video = false}) async {
+  Future<bool> ringUsers(List<String> userIds, {bool video = true}) async {
     final call = _state.call;
     if (call == null || userIds.isEmpty) return false;
     final result = await call.ring(userIds: userIds, video: video);
