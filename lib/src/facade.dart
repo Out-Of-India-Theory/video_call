@@ -239,6 +239,14 @@ class OitVideoCall {
         Future<bool>.value(false);
   }
 
+  /// Flow B: ring the live consultation call's absent member(s) (the customer),
+  /// derived from call membership. No-op when there's no live call / no absent
+  /// member. Returns true on success.
+  static Future<bool> ringAbsentMembers({bool video = true}) {
+    return _controller?.ringAbsentMembers(video: video) ??
+        Future<bool>.value(false);
+  }
+
   static Widget callScreen({
     required String callId,
     bool audioOnly = false,

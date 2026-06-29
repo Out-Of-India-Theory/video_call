@@ -364,6 +364,35 @@ class ActiveCallController extends ChangeNotifier {
     return true;
   }
 
+  /// Rings the live call's members who are NOT currently connected (and not
+  /// self) — i.e. the absent consultation customer. Derives the target from the
+  /// call's membership, so it works regardless of how the call was joined (the
+  /// orders-list order payload doesn't carry the customer id). No-op (false) when
+  /// there's no connected call or no absent member.
+  Future<bool> ringAbsentMembers({bool video = true}) async {
+    final call = _state.call;
+    if (call == null) return false;
+    final s = call.state.value;
+    // Read self from the call state (not the StreamVideo.instance singleton) so
+    // this stays session-driven + unit-testable, mirroring CallState's own
+    // ringingMembers (member.userId != currentUserId).
+    final selfId = s.currentUserId;
+    final connected = s.callParticipants.map((p) => p.userId).toSet();
+    final absent = s.callMembers
+        .map((m) => m.userId)
+        .where((id) => id.isNotEmpty && id != selfId && !connected.contains(id))
+        .toSet()
+        .toList();
+    if (absent.isEmpty) return false;
+    final result = await call.ring(userIds: absent, video: video);
+    if (result.isFailure) {
+      debugPrint(
+          'ActiveCallController.ringAbsentMembers failed: ${(result as Failure).error}');
+      return false;
+    }
+    return true;
+  }
+
   /// Permanent end. Tears down the SDK call, resets state, notifies.
   ///
   /// When [forEveryone] is true, attempts to terminate the call for **all**
