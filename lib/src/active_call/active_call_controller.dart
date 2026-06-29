@@ -7,6 +7,7 @@ import '../config.dart';
 import '../errors.dart';
 import '../screen/call_session.dart';
 import 'active_call_state.dart';
+import 'audio_router.dart';
 
 /// Returned by [ActiveCallController.connectAndJoin] so the screen knows
 /// what to render: ready (call live), or errored.
@@ -32,13 +33,20 @@ class ConnectErrored extends ConnectResult {
 /// or "minimize", we pop the route but the connection stays alive and the
 /// host renders [MinimizedCallView] above the navigator.
 class ActiveCallController extends ChangeNotifier {
-  /// Defaults to [StreamCallSession] so production callers don't need to
-  /// think about it; tests pass a [FakeCallSession] (or any other
-  /// [CallSession] impl).
-  ActiveCallController({CallSession? session})
-      : _session = session ?? StreamCallSession();
+  /// Defaults to [StreamCallSession] and [StreamAudioRouter] so production
+  /// callers don't need to think about them; tests pass a [FakeCallSession] /
+  /// a fake [AudioRouter] (or any other impl).
+  ActiveCallController({CallSession? session, AudioRouter? audioRouter})
+      : _session = session ?? StreamCallSession(),
+        _audioRouter = audioRouter ?? StreamAudioRouter();
 
   final CallSession _session;
+
+  /// Manages audio output routing (connected headset vs loudspeaker) for the
+  /// live call. Attached after a successful join, detached on every teardown
+  /// path. Owned here rather than by `CallScreen` so routing keeps working
+  /// while the call is minimized / in PiP and the screen has been disposed.
+  final AudioRouter _audioRouter;
 
   ActiveCallState _state = ActiveCallState.idle;
   ActiveCallState get state => _state;
@@ -246,6 +254,11 @@ class ActiveCallController extends ChangeNotifier {
     if (stale != null) unawaited(stale.cancel());
     _callStateSub = call.state.listen(_onSdkCallStateChanged);
 
+    // Start managing audio output (connected headset, else loudspeaker).
+    // Fire-and-forget: route application is best-effort and must not block the
+    // call from rendering as connected.
+    unawaited(_audioRouter.attach(call));
+
     notifyListeners();
     return ConnectReady(call);
   }
@@ -429,6 +442,8 @@ class ActiveCallController extends ChangeNotifier {
     final sub = _callStateSub;
     _callStateSub = null;
     if (sub != null) unawaited(sub.cancel());
+    // Stop audio-route management before we tear the call down.
+    unawaited(_audioRouter.detach());
     final call = _state.call;
     _state = _state.copyWith(mode: ActiveCallMode.ending);
     notifyListeners();
@@ -501,6 +516,8 @@ class ActiveCallController extends ChangeNotifier {
     final sub = _callStateSub;
     _callStateSub = null;
     if (sub != null) unawaited(sub.cancel());
+    // Stop audio-route management before we tear the call down.
+    unawaited(_audioRouter.detach());
     final call = _state.call;
     _state = ActiveCallState.idle;
     notifyListeners();
@@ -525,6 +542,7 @@ class ActiveCallController extends ChangeNotifier {
     // late-disconnect re-entry is cheap.
     unawaited(_callStateSub?.cancel());
     _callStateSub = null;
+    unawaited(_audioRouter.detach());
     _state = ActiveCallState.idle;
     notifyListeners();
   }

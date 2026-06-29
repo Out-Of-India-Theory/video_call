@@ -5,6 +5,7 @@ import 'package:oit_video_call/src/config.dart';
 import 'package:oit_video_call/src/facade.dart';
 import 'package:oit_video_call/src/models/video_user.dart';
 
+import 'active_call/fake_audio_router.dart';
 import 'screen/fake_call_session.dart';
 
 OitVideoCallConfig _testConfig() => OitVideoCallConfig(
@@ -71,7 +72,8 @@ void main() {
         // clears its singleton via `InstanceHolder.reset()` (sync, just
         // `_instance = null`) before the returned `Future` even matters.
         final sessionA = FakeCallSession();
-        final controllerA = ActiveCallController(session: sessionA);
+        final controllerA =
+            ActiveCallController(session: sessionA, audioRouter: FakeAudioRouter());
         OitVideoCall.initForTest(
           config: _testConfig(),
           controller: controllerA,
@@ -93,7 +95,8 @@ void main() {
         final sessionB = FakeCallSession();
         OitVideoCall.initForTest(
           config: _testConfig(),
-          controller: ActiveCallController(session: sessionB),
+          controller:
+              ActiveCallController(session: sessionB, audioRouter: FakeAudioRouter()),
         );
 
         // Assertions hold IMMEDIATELY — proves cleanup is synchronous.
