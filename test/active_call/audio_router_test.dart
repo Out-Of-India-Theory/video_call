@@ -100,6 +100,23 @@ void main() {
       expect(router.attached.single, same(controller.state.call));
     });
 
+    test(
+      'attaches the router when joining directly from a ring accept '
+      '(call already active, screen-level join skipped)',
+      () async {
+        // Accept flow (iOS CallKit / Android FCM) already joined the call, so
+        // StreamCallSession.joinCall returns without re-joining — audio
+        // routing must still attach on this path.
+        session.joinCallNoOp = true;
+        await join();
+        expect(session.joinCount, 0); // redundant join was skipped...
+        expect(
+          router.attached.single,
+          same(controller.state.call),
+        ); // ...but the router attached anyway
+      },
+    );
+
     test('detaches the router on endCall', () async {
       await join();
       await controller.endCall();

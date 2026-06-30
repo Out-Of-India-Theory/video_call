@@ -27,6 +27,12 @@ class FakeCallSession implements CallSession {
   Object? getOrCreateError;
 
   Object? joinError;
+
+  /// When true, [joinCall] returns without joining — models the accept flow
+  /// (CallKit / FCM) where the SDK already joined the call before the
+  /// screen-level join runs, so the real session skips the redundant join.
+  bool joinCallNoOp = false;
+
   Object? leaveError;
 
   // Observable state.
@@ -105,6 +111,7 @@ class FakeCallSession implements CallSession {
 
   @override
   Future<void> joinCall(Call call) async {
+    if (joinCallNoOp) return;
     if (joinError != null) throw joinError!;
     joinCount++;
   }

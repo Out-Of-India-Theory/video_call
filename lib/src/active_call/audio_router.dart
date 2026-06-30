@@ -4,16 +4,18 @@ import 'package:flutter/foundation.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
 
 /// Keeps a live call's audio output on the most appropriate device for a 1:1
-/// video consultation: an external headset (wired or Bluetooth) when one is
-/// connected, otherwise the loudspeaker.
+/// video consultation. On **Android** it follows a connected external headset
+/// (wired or Bluetooth) and otherwise routes to the loudspeaker. On **iOS** the
+/// OS and SDK already own routing, so the router intentionally does not force an
+/// output there (see the platform guard in [StreamAudioRouter._applyForDevices]).
 ///
-/// Why this exists: Stream's SDK surfaces audio-device changes but does NOT
-/// auto-switch the output route. Without active management, a headset
-/// connected mid-call receives no audio, and the stock speakerphone toggle
-/// only flips speaker/earpiece — ignoring wired/Bluetooth devices entirely
-/// (dharmayana_app#4957). Routing is owned by `ActiveCallController` rather
-/// than the call screen so it keeps working while the call is minimized / in
-/// PiP, when the screen widget has been disposed.
+/// Why this exists: on Android the SDK surfaces audio-device changes but does
+/// NOT auto-switch the output route, so a headset connected mid-call receives
+/// no audio, and the stock speakerphone toggle only flips speaker/earpiece —
+/// ignoring wired/Bluetooth devices entirely (dharmayana_app#4957). Routing is
+/// owned by `ActiveCallController` rather than the call screen so it keeps
+/// working while the call is minimized / in PiP, when the screen widget has
+/// been disposed.
 abstract class AudioRouter {
   /// Starts managing audio output for [call]: applies the correct route once
   /// immediately, then re-applies on every audio-device change until
@@ -25,17 +27,42 @@ abstract class AudioRouter {
   Future<void> detach();
 }
 
+/// Source of audio-output device state. Wraps the SDK's
+/// [RtcMediaDeviceNotifier] in production; a fake in tests drives
+/// connect/disconnect events deterministically.
+@visibleForTesting
+abstract class AudioDeviceMonitor {
+  /// Emits the full device list on every plug/unplug/pair change.
+  Stream<List<RtcMediaDevice>> get onDeviceChange;
+
+  /// The current output devices, or null when enumeration is unavailable.
+  Future<List<RtcMediaDevice>?> currentOutputs();
+}
+
+class _RtcDeviceMonitor implements AudioDeviceMonitor {
+  _RtcDeviceMonitor(this._notifier);
+
+  final RtcMediaDeviceNotifier _notifier;
+
+  @override
+  Stream<List<RtcMediaDevice>> get onDeviceChange => _notifier.onDeviceChange;
+
+  @override
+  Future<List<RtcMediaDevice>?> currentOutputs() async =>
+      (await _notifier.audioOutputs()).getDataOrNull();
+}
+
 /// Production [AudioRouter] backed by the real Stream SDK device notifier.
 class StreamAudioRouter implements AudioRouter {
-  StreamAudioRouter({RtcMediaDeviceNotifier? notifier})
-      : _notifierOverride = notifier;
+  StreamAudioRouter({@visibleForTesting AudioDeviceMonitor? monitor})
+      : _monitorOverride = monitor;
 
-  /// Test seam. When null, the SDK singleton is resolved lazily on first use
-  /// (inside [attach]) so merely constructing the router — e.g. in a unit-test
-  /// host without the WebRTC plugin — has no native side effects.
-  final RtcMediaDeviceNotifier? _notifierOverride;
-  RtcMediaDeviceNotifier get _notifier =>
-      _notifierOverride ?? RtcMediaDeviceNotifier.instance;
+  /// Test seam. When null, the SDK device notifier is resolved lazily on first
+  /// use (inside [attach]) so merely constructing the router — e.g. in a
+  /// unit-test host without the WebRTC plugin — has no native side effects.
+  final AudioDeviceMonitor? _monitorOverride;
+  AudioDeviceMonitor get _monitor =>
+      _monitorOverride ?? _RtcDeviceMonitor(RtcMediaDeviceNotifier.instance);
 
   Call? _call;
   StreamSubscription<List<RtcMediaDevice>>? _deviceSub;
@@ -53,15 +80,15 @@ class StreamAudioRouter implements AudioRouter {
     // (e.g. a unit-test environment) must never break the call, so guard the
     // native access.
     try {
-      final notifier = _notifier;
+      final monitor = _monitor;
       // `onDeviceChange` only emits on CHANGE, so apply once from the current
       // device list first, then follow subsequent plug/unplug/pair events.
-      _deviceSub = notifier.onDeviceChange.listen(
+      _deviceSub = monitor.onDeviceChange.listen(
         _applyForDevices,
         onError: (Object e) =>
             debugPrint('[oit_video_call] AudioRouter.onDeviceChange error: $e'),
       );
-      final outputs = (await notifier.audioOutputs()).getDataOrNull();
+      final outputs = await monitor.currentOutputs();
       if (outputs != null) await _applyForDevices(outputs);
     } catch (e, st) {
       // Best-effort: a host without the WebRTC device notifier (e.g. a
@@ -88,17 +115,18 @@ class StreamAudioRouter implements AudioRouter {
     if (call == null) return;
     final target = selectAudioOutput(devices);
     if (target == null || target.id == _appliedDeviceId) return;
-    // iOS auto-routes to a connected external (wired/Bluetooth) device, and the
-    // SDK itself avoids forcing it there: `Call._applyDefaultAudioOutput` nulls
-    // the default output for an iOS external device ("trust the OS to set it as
-    // default" — stream_video 1.4.1 call.dart). Forcing `setAudioOutputDevice`
-    // on iOS would reconfigure the AVAudioSession against that design. The real
-    // gap this router fills is Android, where the OS does NOT auto-switch
-    // mid-call. (Speaker/earpiece is still applied on iOS — the SDK sets those
-    // too; only the external case is OS-owned.)
-    if (!kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.iOS &&
-        target.isExternal) {
+    // The router only forces output on Android, where the OS does NOT
+    // auto-switch on a mid-call device change. iOS is left to the OS + SDK:
+    //   * external (wired/BT): iOS auto-routes, and the SDK deliberately does
+    //     not force it — `Call._applyDefaultAudioOutput` nulls the default
+    //     output for an iOS external device ("trust the OS to set it as
+    //     default" — stream_video 1.4.1 call.dart:2480);
+    //   * loudspeaker for a video call: the SDK sets `speakerDefaultOn` at join.
+    // Forcing `setAudioOutputDevice` on iOS re-runs `setAppleAudioConfiguration`
+    // with the CLIENT-level `audioConfigurationPolicy` (rtc_manager.dart:1374) —
+    // which is `ViewerAudioPolicy` on a ring-registered connection — re-applying
+    // the wrong AVAudioSession mode to a live call. So skip iOS entirely.
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
       return;
     }
     final result = await call.setAudioOutputDevice(target);
