@@ -4,9 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
 
 /// Keeps a live call's audio output on the most appropriate device for a 1:1
-/// video consultation. On **Android** it follows a connected external headset
-/// (wired or Bluetooth) and otherwise routes to the loudspeaker. On **iOS** the
-/// OS and SDK already own routing, so the router intentionally does not force an
+/// video consultation. On every non-iOS-native target (**Android**, and web
+/// via `setSinkId`) it follows a connected external headset (wired or
+/// Bluetooth) and otherwise routes to the loudspeaker. On **native iOS** the OS
+/// and SDK already own routing, so the router intentionally does not force an
 /// output there (see the platform guard in [StreamAudioRouter._applyForDevices]).
 ///
 /// Why this exists: on Android the SDK surfaces audio-device changes but does
@@ -115,8 +116,10 @@ class StreamAudioRouter implements AudioRouter {
     if (call == null) return;
     final target = selectAudioOutput(devices);
     if (target == null || target.id == _appliedDeviceId) return;
-    // The router only forces output on Android, where the OS does NOT
-    // auto-switch on a mid-call device change. iOS is left to the OS + SDK:
+    // The router forces output on every non-iOS-native target (Android, and
+    // web via `setSinkId`), where the OS does NOT auto-switch on a mid-call
+    // device change. Only NATIVE iOS is skipped — there routing is owned by the
+    // OS + SDK:
     //   * external (wired/BT): iOS auto-routes, and the SDK deliberately does
     //     not force it — `Call._applyDefaultAudioOutput` nulls the default
     //     output for an iOS external device ("trust the OS to set it as
@@ -125,7 +128,9 @@ class StreamAudioRouter implements AudioRouter {
     // Forcing `setAudioOutputDevice` on iOS re-runs `setAppleAudioConfiguration`
     // with the CLIENT-level `audioConfigurationPolicy` (rtc_manager.dart:1374) —
     // which is `ViewerAudioPolicy` on a ring-registered connection — re-applying
-    // the wrong AVAudioSession mode to a live call. So skip iOS entirely.
+    // the wrong AVAudioSession mode to a live call. The `!kIsWeb` keeps this
+    // skip off web (an iPhone Safari reports `iOS` but uses the harmless
+    // `setSinkId` path, not `setAppleAudioConfiguration`).
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
       return;
     }
