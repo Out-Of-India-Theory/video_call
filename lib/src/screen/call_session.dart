@@ -70,6 +70,11 @@ abstract class CallSession {
 /// Broadcaster even when we reuse the Viewer-policy ring connection — call
 /// preferences win over the client-level
 /// `StreamVideoOptions.audioConfigurationPolicy` (see `Call._ensurePcFactory`).
+///
+/// This covers the per-call factory (mic capture: echo cancellation / noise
+/// suppression) but NOT the SDK's GLOBAL audio configuration, which the ring
+/// connection pins to Viewer. That is re-asserted separately by
+/// [StreamRingService.applyCallAudioPolicy] on join — see [StreamCallSession.joinCall].
 CallPreferences _callAudioPreferences() => DefaultCallPreferences(
       audioConfigurationPolicy: const BroadcasterAudioPolicy(),
     );
@@ -151,6 +156,17 @@ class StreamCallSession implements CallSession {
 
   @override
   Future<void> joinCall(Call call) async {
+    // Force the live-call audio configuration (Broadcaster: echo cancellation +
+    // communication-mode / earpiece routing) GLOBALLY. The call PREFERENCE set
+    // in getCall/getOrCreateCall only reconfigures the per-call
+    // PeerConnectionFactory (mic capture); it does NOT switch the SDK's global
+    // audio configuration, which the long-lived ring connection pins to
+    // ViewerAudioPolicy (media, NO echo cancellation) for loud rings — so
+    // without this the remote party hears echo. Runs BEFORE the reuse
+    // early-return below so it also covers the accept flow (which joined the
+    // call before this screen-level join). Symmetric with restoreRingAudioPolicy()
+    // on leave; no-op unless the ring connection is active.
+    await StreamRingService.instance.applyCallAudioPolicy();
     // The accept flow (iOS CallKit / Android FCM) joins the call before this
     // screen-level auto-join runs, so it may already be active. The SDK rejects
     // a second join() on an active cid ("a call with the same cid is in
@@ -158,10 +174,6 @@ class StreamCallSession implements CallSession {
     // redundant join. Paired with getCall/getOrCreateCall returning that active
     // call, the UI renders it as it connects (no spurious "retry" prompt).
     if (_activeCallFor(call.callCid) != null) return;
-    // Audio policy for the live call (Broadcaster: echo cancellation +
-    // communication-mode routing) is set via the call PREFERENCE in
-    // getCall/getOrCreateCall, which wins over the Viewer policy the reused
-    // ring-reception SDK was constructed with. See [_callAudioPreferences].
     final result = await call.join();
     if (result.isFailure) {
       final failure = result as Failure;

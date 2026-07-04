@@ -188,6 +188,39 @@ class StreamRingService {
     }
   }
 
+  /// Applies the live-call audio configuration ([BroadcasterAudioPolicy]:
+  /// communication mode / `MODE_IN_COMMUNICATION`, echo cancellation, noise
+  /// suppression, earpiece/speaker call routing) GLOBALLY.
+  ///
+  /// The symmetric counterpart of [restoreRingAudioPolicy] — call this when a
+  /// call is joined; that one on leave/end.
+  ///
+  /// The long-lived ring connection is constructed with [ViewerAudioPolicy]
+  /// (media playback, **no echo cancellation**) so incoming rings play loud,
+  /// and the SDK applies that client-level policy to the GLOBAL audio
+  /// configuration at construction (and again whenever an audio output device
+  /// is selected — see `RtcManager.setAudioOutputDevice`). Supplying
+  /// [BroadcasterAudioPolicy] only as a per-call PREFERENCE (see
+  /// `call_session.dart` `_callAudioPreferences`) reconfigures the per-call
+  /// PeerConnectionFactory but NOT that global configuration, so without this
+  /// the live call runs under the Viewer policy's media routing and the remote
+  /// party hears echo. This re-asserts communication-mode audio for the whole
+  /// call, overriding the client-level Viewer policy.
+  ///
+  /// No-op unless the ring connection is active: when it isn't, the per-call
+  /// [StreamVideo] was built with the SDK-default Broadcaster policy and already
+  /// has echo cancellation. Best-effort — a failure only degrades call audio and
+  /// must never block the join.
+  Future<void> applyCallAudioPolicy() async {
+    if (!_active) return;
+    try {
+      await RtcMediaDeviceNotifier.instance
+          .reinitializeAudioConfiguration(const BroadcasterAudioPolicy());
+    } catch (e) {
+      debugPrint('StreamRingService: applying call audio policy failed: $e');
+    }
+  }
+
   /// Canonical terminated/background-isolate ring handler (per Stream docs).
   ///
   /// A fresh FCM background isolate has NO [StreamVideo.instance], so we
