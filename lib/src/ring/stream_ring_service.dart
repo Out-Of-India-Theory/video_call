@@ -26,6 +26,31 @@ const StreamVideoPushConfiguration _ringPushConfig = StreamVideoPushConfiguratio
   ),
 );
 
+/// Audio policy for the long-lived ring-RECEPTION [StreamVideo].
+///
+/// Constructing [StreamVideo] applies this policy to the device's GLOBAL audio
+/// configuration, and the SDK re-applies the client-level policy during a live
+/// call (`setAudioOutputDevice`, connect-time `_applyConnectOptions` in
+/// stream_video 1.4.1) — so this policy, not just the per-call preference,
+/// governs the live call's routing on iOS.
+///
+/// - **iOS → [BroadcasterAudioPolicy]** (communication mode, echo cancellation).
+///   Incoming rings render via CallKit (system UI), independent of the app's
+///   audio session, so Broadcaster does NOT quiet the ring — while it keeps AEC
+///   on for the call. Using [ViewerAudioPolicy] here left AEC off and the remote
+///   party heard echo whenever an iOS device was in the call (consumer 6.7.5 /
+///   mitra 1.8.5).
+/// - **Android / other → [ViewerAudioPolicy]** (media playback, `MODE_NORMAL`).
+///   Android's communication mode DUCKS the ringtone to near silence, so the
+///   ring connection stays on media playback for a loud ring; the live call's
+///   audio is fixed per-call by the Broadcaster call preference (which drives
+///   the global AudioSwitchManager on Android — Android-to-Android has no echo).
+@visibleForTesting
+AudioConfigurationPolicy ringReceptionAudioPolicy() =>
+    (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS)
+        ? const BroadcasterAudioPolicy()
+        : const ViewerAudioPolicy();
+
 /// Owns a long-lived [StreamVideo] connection used to RECEIVE ringing pushes
 /// (server T-5 ring, mitra re-ring) even when the app is backgrounded or
 /// killed.
@@ -125,16 +150,13 @@ class StreamRingService {
       // instead of a cold reconnect (per Stream docs).
       options: StreamVideoOptions(
         keepConnectionsAliveWhenInBackground: true,
-        // CRITICAL for ring loudness: constructing StreamVideo immediately
-        // calls reinitializeAudioConfiguration(policy). The default
-        // BroadcasterAudioPolicy sets the device to MODE_IN_COMMUNICATION
-        // (voice-call routing), which DUCKS the incoming-call ringtone
-        // (USAGE_NOTIFICATION_RINGTONE on STREAM_RING) to near silence — even
-        // at max ring volume. A ring-RECEPTION connection is not a live call,
-        // so use ViewerAudioPolicy (media playback, MODE_NORMAL): the ring
-        // plays at full volume. The actual joined call (OitVideoCall.init)
-        // keeps the default Broadcaster policy for proper call audio.
-        audioConfigurationPolicy: const ViewerAudioPolicy(),
+        // Platform-conditional ring-reception audio policy — see
+        // [ringReceptionAudioPolicy]. Android uses ViewerAudioPolicy (media,
+        // MODE_NORMAL) so communication-mode routing doesn't DUCK the ringtone
+        // to near silence; iOS uses BroadcasterAudioPolicy (its ring is CallKit,
+        // unaffected by this policy) to keep echo cancellation on for the live
+        // call and avoid the remote-echo regression.
+        audioConfigurationPolicy: ringReceptionAudioPolicy(),
       ),
       tokenLoader: (_) => tokenProvider(),
       pushNotificationManagerProvider:
@@ -168,21 +190,23 @@ class StreamRingService {
     return StreamVideo.instance.handleRingingFlowNotifications(data);
   }
 
-  /// Restores the loud-ring audio configuration ([ViewerAudioPolicy], media
-  /// playback / `MODE_NORMAL`).
+  /// Restores the ring-reception audio configuration (see
+  /// [ringReceptionAudioPolicy]) after a call.
   ///
-  /// A live call switches the device into communication mode
+  /// On Android a live call switches the device into communication mode
   /// ([BroadcasterAudioPolicy]) for echo cancellation and earpiece routing.
   /// Because the ring connection is kept alive across calls (we never
   /// `StreamVideo.reset` while ringing is active), that communication mode would
-  /// otherwise linger and DUCK the next incoming ring. Call this on call
-  /// teardown and before showing a ring. No-op when ringing isn't active in this
+  /// otherwise linger and DUCK the next incoming ring — so this resets Android
+  /// to media playback ([ViewerAudioPolicy]). Call this on call teardown and
+  /// before showing a ring. (On iOS the ring is CallKit, so the policy stays
+  /// Broadcaster — a no-op change.) No-op when ringing isn't active in this
   /// isolate; best-effort (a failure only degrades ring loudness).
   Future<void> restoreRingAudioPolicy() async {
     if (!_active) return;
     try {
       await RtcMediaDeviceNotifier.instance
-          .reinitializeAudioConfiguration(const ViewerAudioPolicy());
+          .reinitializeAudioConfiguration(ringReceptionAudioPolicy());
     } catch (e) {
       debugPrint('StreamRingService: restoring ring audio policy failed: $e');
     }
@@ -214,11 +238,12 @@ class StreamRingService {
     final sv = StreamVideo.create(
       apiKey,
       user: User.regular(userId: user.id, name: user.name, image: user.image),
-      // ViewerAudioPolicy (media, MODE_NORMAL) so constructing this background
-      // ring-reception SDK does NOT switch the device into communication mode,
-      // which would duck the incoming-call ringtone. See register() for detail.
+      // Platform-conditional ring-reception policy (see
+      // [ringReceptionAudioPolicy] / register): Android media playback so this
+      // background ring-reception SDK doesn't duck the ringtone; iOS Broadcaster
+      // (its ring is CallKit) to keep echo cancellation on for the live call.
       options: StreamVideoOptions(
-        audioConfigurationPolicy: const ViewerAudioPolicy(),
+        audioConfigurationPolicy: ringReceptionAudioPolicy(),
       ),
       tokenLoader: (_) => tokenProvider(),
       pushNotificationManagerProvider:
