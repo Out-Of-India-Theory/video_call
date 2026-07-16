@@ -93,6 +93,25 @@ class StreamRingService {
   /// while one is in flight); torn down in [unregister].
   StreamSubscription<CallState>? _acceptedCallSub;
 
+  /// The exact [Call] instance the SDK accepted for the in-flight ring, exposed
+  /// to [StreamCallSession] via [acceptedCallFor] so the screen-level join
+  /// REUSES it instead of minting a second `Call` for the same cid.
+  ///
+  /// This is the fix for the "same user joins the call 2–4× / two participants
+  /// from one phone the moment they accept" bug: on accept, the SDK's own
+  /// accept handler (`observeCallAcceptRingingEvent` → `_onCallAccept`) joins
+  /// the call it consumed, and — separately — the host app navigates in and
+  /// this screen joins too. When those were two different `Call` objects for
+  /// the same cid they each opened an SFU session. Handing the app the SAME
+  /// instance the SDK is using makes the app's join idempotent (already
+  /// connected/connecting → success, no new session).
+  ///
+  /// Set in `deliver` (before navigation), cleared when that call ends (so a
+  /// later re-ring of the same cid stashes a fresh instance) and on
+  /// [unregister]. At most one is live at a time — [AcceptArming] won't deliver
+  /// a second accept while one is in flight.
+  Call? _acceptedCall;
+
   /// True once [register] has constructed + connected the long-lived SDK.
   ///
   /// [StreamCallSession] reads this to (a) REUSE the connection instead of
@@ -105,6 +124,17 @@ class StreamRingService {
   /// Test seam for [StreamCallSession] reuse-guard tests.
   @visibleForTesting
   set debugActive(bool value) => _active = value;
+
+  /// The [Call] the SDK accepted for the in-flight ring, IF its cid matches
+  /// [cid]; otherwise null. [StreamCallSession] reuses it so the screen-level
+  /// join lands on the same instance the SDK is already bringing up, instead of
+  /// opening a second SFU session for the same cid. See [_acceptedCall].
+  Call? acceptedCallFor(StreamCallCid cid) =>
+      _acceptedCall?.callCid == cid ? _acceptedCall : null;
+
+  /// Test seam for [acceptedCallFor] reuse tests.
+  @visibleForTesting
+  set debugAcceptedCall(Call? call) => _acceptedCall = call;
 
   /// Constructs the long-lived [StreamVideo] with the official push manager
   /// and connects (registering the device for call pushes). Idempotent, and
@@ -361,6 +391,10 @@ class StreamRingService {
       // cid (server T-5/T+2 re-ring, mitra "Ring customer") navigates again
       // instead of being silently dropped (#5205).
       if (!_arming.shouldDeliver(call.id)) return;
+      // Stash the accepted instance BEFORE navigating so the screen-level join
+      // reuses it (via [acceptedCallFor]) rather than joining a second `Call`
+      // for the same cid — the source of the duplicate/simultaneous sessions.
+      _acceptedCall = call;
       _watchAcceptedCallEnd(call);
       onAccepted(call.id);
     }
@@ -412,6 +446,9 @@ class StreamRingService {
     _acceptedCallSub?.cancel();
     _acceptedCallSub = watchCallEnd(call, () {
       _arming.callEnded(call.id);
+      // Drop the reuse handle so a later re-ring of the same cid stashes a
+      // fresh instance instead of handing the app a disconnected `Call`.
+      if (identical(_acceptedCall, call)) _acceptedCall = null;
       _acceptedCallSub = null;
     });
   }
@@ -475,6 +512,7 @@ class StreamRingService {
     _acceptSub = null;
     await _acceptedCallSub?.cancel();
     _acceptedCallSub = null;
+    _acceptedCall = null;
     _arming.reset();
     _acceptWired = false;
     await StreamVideo.reset(disconnect: true);

@@ -22,6 +22,24 @@ void main() {
     expect(StreamRingService.instance.isActive, isFalse);
   });
 
+  group('acceptedCallFor', () {
+    tearDown(() => StreamRingService.instance.debugAcceptedCall = null);
+
+    // The reuse handle is the fix for the duplicate-join bug: the screen-level
+    // join reuses this instance instead of opening a second SFU session. With
+    // no accept in flight there is nothing to reuse, so it must be null (and
+    // must not throw on the null deref).
+    test('returns null when no accept is in flight', () {
+      StreamRingService.instance.debugAcceptedCall = null;
+      expect(
+        StreamRingService.instance.acceptedCallFor(
+          StreamCallCid(cid: 'default:order-1'),
+        ),
+        isNull,
+      );
+    });
+  });
+
   group('ringReceptionAudioPolicy', () {
     // iOS renders incoming rings via CallKit (system UI), so the long-lived ring
     // connection can hold BroadcasterAudioPolicy — echo cancellation stays on

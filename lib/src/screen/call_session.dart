@@ -106,6 +106,21 @@ class StreamCallSession implements CallSession {
     return null;
   }
 
+  /// The one [Call] instance for [cid] already in play in THIS process, if any:
+  /// either an active (joined) call, or the call the ring accept-observer just
+  /// accepted and is bringing up ([StreamRingService.acceptedCallFor]).
+  ///
+  /// Reusing it — instead of minting a fresh [makeCall] — is what prevents a
+  /// SECOND SFU session (the "same user joined 2–4× / two participants from one
+  /// phone on accept" bug). On accept, the SDK's own accept handler joins the
+  /// call it consumed, while this screen-level flow would otherwise join a
+  /// DIFFERENT `Call` object for the same cid; the two race `Call.join`'s
+  /// `activeCalls` guard (checked before an `await`) and each opens its own
+  /// session. Funnelling both onto the SAME instance makes the second join a
+  /// no-op (the SDK returns success for an already-connected/-connecting call).
+  Call? _reusableCallFor(StreamCallCid cid) =>
+      _activeCallFor(cid) ?? StreamRingService.instance.acceptedCallFor(cid);
+
   @override
   Future<Call> getCall({
     required String callType,
@@ -116,7 +131,7 @@ class StreamCallSession implements CallSession {
       id: callId,
       preferences: _callAudioPreferences(),
     );
-    final existing = _activeCallFor(call.callCid);
+    final existing = _reusableCallFor(call.callCid);
     if (existing != null) return existing;
     final result = await call.get();
     if (result.isFailure) {
@@ -139,7 +154,7 @@ class StreamCallSession implements CallSession {
       id: callId,
       preferences: _callAudioPreferences(),
     );
-    final existing = _activeCallFor(call.callCid);
+    final existing = _reusableCallFor(call.callCid);
     if (existing != null) return existing;
     final result = await call.getOrCreate();
     if (result.isFailure) {
@@ -165,6 +180,15 @@ class StreamCallSession implements CallSession {
     final result = await call.join();
     if (result.isFailure) {
       final failure = result as Failure;
+      // A concurrent join of the same cid was already in flight (typically the
+      // ring accept-observer's own `join()` on the call it consumed). The SDK
+      // rejects the second attempt with "a call with the same cid is in
+      // progress" — but the call IS coming up, so this is a benign reuse, not a
+      // failure. Swallowing it (rather than throwing) keeps a single session
+      // and avoids stranding the user on the "Joining…"/error screen. Combined
+      // with [_reusableCallFor], both paths normally share one instance and
+      // never reach here; this is defense-in-depth for the residual race.
+      if (isCallAlreadyInProgressError(failure.error)) return;
       throw Exception('call.join() failed: ${failure.error}');
     }
   }
@@ -226,6 +250,31 @@ bool isHttpNotFoundError(Object error) {
   try {
     final cause = (error as dynamic).cause;
     return cause is ApiException && cause.code == 404;
+  } catch (_) {
+    return false;
+  }
+}
+
+/// Detects the specific `Call.join()` failure the SDK raises when a join for
+/// the same cid is already in flight: `VideoError(message: 'a call with the
+/// same cid is in progress')` (stream_video `call.dart`).
+///
+/// [StreamCallSession.joinCall] treats this as a benign no-op rather than an
+/// error — it means another path (typically the ring accept-observer's own
+/// `join()`) is already bringing this call up, so failing here would strand the
+/// user on the join screen for a call that is actually connecting.
+///
+/// Like [isHttpNotFoundError], we read `.message` via a `dynamic` cast guarded
+/// by try/catch because `stream_video` does not export `VideoError`. A future
+/// SDK rewording returns `false` (safe: a real duplicate-join surfaces as a
+/// normal error) and the unit tests in `test/screen/call_session_test.dart`
+/// flag the change.
+@visibleForTesting
+bool isCallAlreadyInProgressError(Object error) {
+  try {
+    final message = (error as dynamic).message;
+    return message is String &&
+        message.toLowerCase().contains('same cid is in progress');
   } catch (_) {
     return false;
   }
