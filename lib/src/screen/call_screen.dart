@@ -33,6 +33,8 @@ class CallScreen extends StatefulWidget {
     this.onCallEnded,
     this.confirmLeave,
     this.waitingForOtherParticipant,
+    this.callOverlay,
+    this.onSystemEnded,
     @visibleForTesting this.deps,
   });
 
@@ -59,6 +61,21 @@ class CallScreen extends StatefulWidget {
   /// Optional widget rendered over the call screen while the local user is
   /// alone in the call (no remote participants yet).
   final Widget? waitingForOtherParticipant;
+
+  /// Optional widget rendered persistently over the live call (below the
+  /// call app bar) for the whole connected duration. The host owns its
+  /// content, timing, dismissal, and copy — e.g. the user app's dismissable
+  /// "2 minutes left" nudge or the jyotishi app's always-on countdown bar.
+  /// This package neither ends the call at any cap (the backend owns
+  /// termination) nor interprets the overlay; it just draws it.
+  final Widget? callOverlay;
+
+  /// Invoked once when the SDK reports the call was ended by the **system** —
+  /// a backend `call.ended` with no `endedBy` user (i.e. the hard time cap) —
+  /// rather than by a participant. Lets the host distinguish a system
+  /// termination (→ e.g. rebook / "time complete") from a user/jyotishi leave
+  /// or a network drop, for which it is NOT called.
+  final VoidCallback? onSystemEnded;
 
   @visibleForTesting
   final CallScreenDeps? deps;
@@ -102,6 +119,13 @@ class _CallScreenState extends State<CallScreen> {
   /// server). PopScope's `canPop` mirrors this so the next pop attempt
   /// goes through instead of being re-intercepted into confirmLeave.
   bool _leaveInProgress = false;
+
+  /// Subscription to the live call's events, used to detect a system end.
+  /// Only attached when [CallScreen.onSystemEnded] is supplied.
+  StreamSubscription<StreamCallEvent>? _callEventsSub;
+
+  /// Guards [CallScreen.onSystemEnded] so it fires at most once.
+  bool _systemEndSignaled = false;
 
   @override
   void initState() {
@@ -195,6 +219,47 @@ class _CallScreenState extends State<CallScreen> {
         ConnectErrored(:final code, :final message) => _Errored(code, message),
       };
     });
+    if (result is ConnectReady) _watchSystemEnd(result.call);
+  }
+
+  /// Subscribes to the live call's events to detect a **system** end — a
+  /// backend `call.ended` with no `endedBy` user (the hard time cap) — and
+  /// fires [CallScreen.onSystemEnded] once. A participant leave (user or
+  /// jyotishi) carries an `endedByUserId`, so it is ignored here; network
+  /// drops surface as other disconnect reasons, not a call-ended event.
+  /// No-op when the host wants no system-end signal.
+  void _watchSystemEnd(Call call) {
+    if (widget.onSystemEnded == null) return;
+    _callEventsSub?.cancel();
+    _callEventsSub = call.callEvents.listen((event) {
+      if (event is StreamCallEndedEvent) {
+        final bySystem = event.endedByUserId == null;
+        debugPrint(
+          '[oit_video_call] callEvents → StreamCallEndedEvent '
+          'endedByUserId=${event.endedByUserId} reason=${event.reason} '
+          'bySystem=$bySystem',
+        );
+        if (bySystem) _signalSystemEnd();
+      }
+    });
+  }
+
+  /// Fires [CallScreen.onSystemEnded] at most once. Reached from two paths that
+  /// each can win the race when the backend ends the call at the hard cap:
+  /// - the coordinator `call.ended` event on [Call.callEvents] (emitted before
+  ///   the status flips), and
+  /// - [_onCallDisconnected] with an "ended" reason (when the SFU delivers the
+  ///   end first, the status flips — and the screen pops and disposes the
+  ///   events subscription — before that coordinator event arrives).
+  ///
+  /// A participant leave disconnects with `DisconnectReason.cancelled` and a
+  /// network drop with a failure/timeout, so neither path mistakes those for a
+  /// system termination.
+  void _signalSystemEnd() {
+    if (_systemEndSignaled) return;
+    _systemEndSignaled = true;
+    debugPrint('[oit_video_call] system end → firing onSystemEnded');
+    widget.onSystemEnded?.call();
   }
 
   void _onControllerChanged() {
@@ -214,6 +279,7 @@ class _CallScreenState extends State<CallScreen> {
 
   @override
   void dispose() {
+    unawaited(_callEventsSub?.cancel());
     _controller.removeListener(_onControllerChanged);
     WakelockPlus.disable();
     // No `leaveCall` here — controller owns the call lifecycle now.
@@ -311,7 +377,23 @@ class _CallScreenState extends State<CallScreen> {
   /// this, the SDK's default would be `Navigator.maybePop` which
   /// re-enters our PopScope and shows confirmLeave for an already-ended
   /// call, leaving the screen stuck on "Connecting" if the user cancels.
-  void _onCallDisconnected(CallDisconnectedProperties _) {
+  void _onCallDisconnected(CallDisconnectedProperties props) {
+    // A backend `call.end()` at the hard cap surfaces as a disconnect whose
+    // reason is `ended`, on whichever socket (coordinator or SFU) delivers it
+    // first. This is the robust system-end signal — the coordinator
+    // `call.callEvents` path (see [_watchSystemEnd]) can be missed if the SFU
+    // wins and this pop disposes the subscription first. A participant leave is
+    // `cancelled`, a drop is a failure/timeout, so those don't fire it.
+    final reason = props.reason;
+    final bySystem =
+        reason is DisconnectReasonEnded || reason is DisconnectReasonCallEnded;
+    debugPrint(
+      '[oit_video_call] onCallDisconnected → reason=${reason.runtimeType} '
+      'bySystem=$bySystem',
+    );
+    if (bySystem) {
+      _signalSystemEnd();
+    }
     _triggerPop();
   }
 
@@ -374,16 +456,29 @@ class _CallScreenState extends State<CallScreen> {
                 ),
               ),
             ),
-            // Offset by status bar + Material AppBar height so the banner sits just below
-            // Stream's CallAppBar instead of overlapping the back/leave controls.
-            if (widget.waitingForOtherParticipant != null)
+            // Offset by status bar + Material AppBar height so the overlays sit
+            // just below Stream's CallAppBar instead of overlapping the
+            // back/leave controls. The host-owned persistent overlay
+            // (time-limit nudge / countdown bar) and the waiting banner stack
+            // vertically in a Column so they never overlap: the persistent
+            // overlay stays pinned on top while the waiting banner sits below
+            // and collapses to zero once the remote joins.
+            if (widget.callOverlay != null ||
+                widget.waitingForOtherParticipant != null)
               Positioned(
                 top: MediaQuery.of(context).padding.top + kToolbarHeight,
                 left: 0,
                 right: 0,
-                child: WaitingBannerGate(
-                  call: call,
-                  child: widget.waitingForOtherParticipant!,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (widget.callOverlay != null) widget.callOverlay!,
+                    if (widget.waitingForOtherParticipant != null)
+                      WaitingBannerGate(
+                        call: call,
+                        child: widget.waitingForOtherParticipant!,
+                      ),
+                  ],
                 ),
               ),
           ],

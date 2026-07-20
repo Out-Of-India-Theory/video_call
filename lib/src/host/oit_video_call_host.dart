@@ -396,6 +396,10 @@ class _OitVideoCallHostState extends State<OitVideoCallHost> {
           onCallEnded: args.onCallEnded,
           confirmLeave: args.confirmLeave,
           waitingForOtherParticipant: args.waitingForOtherParticipant,
+          // Preserve the time-limit overlay + system-end signal across a
+          // minimize → tap-to-expand round trip.
+          callOverlay: args.callOverlay,
+          onSystemEnded: args.onSystemEnded,
         ),
       ),
     );
