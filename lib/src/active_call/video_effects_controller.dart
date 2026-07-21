@@ -36,8 +36,12 @@ class VideoEffectsController {
     return Platform.isAndroid;
   }
 
+  bool _disposed = false;
+
   Future<void> applyBlur(BlurIntensity intensity) async {
+    if (_disposed) return;
     await _manager.applyBackgroundBlurFilter(intensity);
+    if (_disposed) return;
     effect.value = switch (intensity) {
       BlurIntensity.light => BackgroundEffect.blurLight,
       BlurIntensity.medium => BackgroundEffect.blurMedium,
@@ -46,15 +50,21 @@ class VideoEffectsController {
   }
 
   /// Phase-2 capability (preset/custom images). Not used by Phase-1 UI.
-  Future<void> applyImage(String assetOrUrl) =>
-      _manager.applyBackgroundImageFilter(assetOrUrl);
+  Future<void> applyImage(String assetOrUrl) async {
+    if (_disposed) return;
+    await _manager.applyBackgroundImageFilter(assetOrUrl);
+  }
 
   Future<void> clear() async {
+    if (_disposed) return;
     await _manager.disableAllFilters();
+    if (_disposed) return;
     effect.value = BackgroundEffect.none;
   }
 
   Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
     await _manager.dispose();
     effect.dispose();
   }

@@ -563,6 +563,12 @@ class ActiveCallController extends ChangeNotifier {
     unawaited(_callStateSub?.cancel());
     _callStateSub = null;
     unawaited(_audioRouter.detach());
+    // Dispose the background-effects manager for this call (symmetry with
+    // endCall/cleanupForReinit; defensive — reset() is not normally reached
+    // with a live call).
+    final effects = _effects;
+    _effects = null;
+    if (effects != null) unawaited(effects.dispose());
     _state = ActiveCallState.idle;
     notifyListeners();
   }
