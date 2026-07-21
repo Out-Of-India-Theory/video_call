@@ -14,9 +14,14 @@ class OitVideoCallConfig {
     required this.apiKey,
     required this.user,
     required this.tokenProvider,
+    this.enableBackgroundEffects = false,
   });
 
   final String apiKey;
   final VideoUser user;
   final TokenProvider tokenProvider;
+
+  /// When true (and the platform supports it), the in-call controls show the
+  /// background-effects button. Apps pass their Remote Config kill-switch here.
+  final bool enableBackgroundEffects;
 }
