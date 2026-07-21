@@ -8,6 +8,7 @@ import '../errors.dart';
 import '../screen/call_session.dart';
 import 'active_call_state.dart';
 import 'audio_router.dart';
+import 'video_effects_controller.dart';
 
 /// Returned by [ActiveCallController.connectAndJoin] so the screen knows
 /// what to render: ready (call live), or errored.
@@ -47,6 +48,12 @@ class ActiveCallController extends ChangeNotifier {
   /// path. Owned here rather than by `CallScreen` so routing keeps working
   /// while the call is minimized / in PiP and the screen has been disposed.
   final AudioRouter _audioRouter;
+
+  VideoEffectsController? _effects;
+
+  /// The background-effects controller for the live call, or null when no call
+  /// is active. Created on successful join, disposed on teardown.
+  VideoEffectsController? get effects => _effects;
 
   ActiveCallState _state = ActiveCallState.idle;
   ActiveCallState get state => _state;
@@ -241,6 +248,11 @@ class ActiveCallController extends ChangeNotifier {
     }
 
     _state = _state.copyWith(mode: ActiveCallMode.connected, call: call);
+
+    // Own a background-effects controller for the live call. Disposed on every
+    // teardown path (endCall / cleanupForReinit) alongside the other per-call
+    // resources below.
+    _effects = VideoEffectsController(call);
 
     // Subscribe BEFORE notifyListeners so a synchronous observer that calls
     // endCall() inside its listener finds the subscription already in place
@@ -444,6 +456,10 @@ class ActiveCallController extends ChangeNotifier {
     if (sub != null) unawaited(sub.cancel());
     // Stop audio-route management before we tear the call down.
     unawaited(_audioRouter.detach());
+    // Dispose the background-effects manager for this call.
+    final effects = _effects;
+    _effects = null;
+    if (effects != null) unawaited(effects.dispose());
     final call = _state.call;
     _state = _state.copyWith(mode: ActiveCallMode.ending);
     notifyListeners();
@@ -518,6 +534,10 @@ class ActiveCallController extends ChangeNotifier {
     if (sub != null) unawaited(sub.cancel());
     // Stop audio-route management before we tear the call down.
     unawaited(_audioRouter.detach());
+    // Dispose the background-effects manager for this call.
+    final effects = _effects;
+    _effects = null;
+    if (effects != null) unawaited(effects.dispose());
     final call = _state.call;
     _state = ActiveCallState.idle;
     notifyListeners();
