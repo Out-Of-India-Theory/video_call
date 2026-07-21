@@ -9,6 +9,7 @@ import '../active_call/active_call_controller.dart';
 import '../active_call/active_call_state.dart';
 import '../config.dart';
 import '../errors.dart';
+import 'background_effect_option.dart';
 import 'error_view.dart';
 import 'permission_gate.dart';
 import 'waiting_banner_gate.dart';
@@ -421,6 +422,7 @@ List<Widget> webCallControlOptions({required Call call}) => [
 @visibleForTesting
 List<Widget> mobileCallControlOptions({required Call call}) => [
       ToggleCameraOption(call: call),
+      BackgroundEffectOption(call: call),
       ToggleMicrophoneOption(call: call),
       FlipCameraOption(call: call),
     ];
