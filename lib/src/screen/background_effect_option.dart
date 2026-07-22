@@ -5,9 +5,16 @@ import 'package:stream_video_flutter/stream_video_flutter.dart';
 import '../active_call/video_effects_controller.dart';
 import '../facade.dart';
 
-/// Control-bar button that opens a sheet to pick a background effect
-/// (Phase 1: Off / Blur Light·Medium·Heavy). Renders nothing when disabled by
-/// config or unsupported by the platform, or when no effects controller exists.
+/// Control-bar button that toggles background blur on/off (Phase 1).
+///
+/// A single tap applies heavy background blur; tapping again clears it. Renders
+/// nothing when disabled by config or unsupported by the platform, or when no
+/// effects controller exists.
+///
+/// Blur strength is fixed to [BlurIntensity.heavy] — the SDK exposes three
+/// discrete levels but product wants a single, strongest-blur toggle. The
+/// underlying [VideoEffectsController] still supports all intensities (and the
+/// Phase-2 image capability) if a richer picker is wanted later.
 class BackgroundEffectOption extends StatelessWidget {
   const BackgroundEffectOption({super.key, required this.call});
 
@@ -27,46 +34,11 @@ class BackgroundEffectOption extends StatelessWidget {
       builder: (context, current, _) {
         final on = current != BackgroundEffect.none;
         return IconButton(
-          tooltip: 'Background',
+          tooltip: on ? 'Turn off blur' : 'Blur background',
+          isSelected: on,
           icon: Icon(on ? Icons.blur_on : Icons.blur_off),
-          onPressed: () => _openSheet(context, effects, current),
-        );
-      },
-    );
-  }
-
-  Future<void> _openSheet(
-    BuildContext context,
-    VideoEffectsController effects,
-    BackgroundEffect current,
-  ) {
-    return showModalBottomSheet<void>(
-      context: context,
-      builder: (sheetContext) {
-        Widget tile(String label, BackgroundEffect value, VoidCallback apply) {
-          return ListTile(
-            title: Text(label),
-            trailing: current == value ? const Icon(Icons.check) : null,
-            onTap: () {
-              apply();
-              Navigator.of(sheetContext).pop();
-            },
-          );
-        }
-
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              tile('Off', BackgroundEffect.none, effects.clear),
-              tile('Blur — Light', BackgroundEffect.blurLight,
-                  () => effects.applyBlur(BlurIntensity.light)),
-              tile('Blur — Medium', BackgroundEffect.blurMedium,
-                  () => effects.applyBlur(BlurIntensity.medium)),
-              tile('Blur — Heavy', BackgroundEffect.blurHeavy,
-                  () => effects.applyBlur(BlurIntensity.heavy)),
-            ],
-          ),
+          onPressed: () =>
+              on ? effects.clear() : effects.applyBlur(BlurIntensity.heavy),
         );
       },
     );
