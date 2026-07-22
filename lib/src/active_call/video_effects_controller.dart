@@ -38,15 +38,25 @@ class VideoEffectsController {
 
   bool _disposed = false;
 
-  Future<void> applyBlur(BlurIntensity intensity) async {
-    if (_disposed) return;
+  /// Applies background blur, returning whether it actually took effect.
+  ///
+  /// The SDK's `applyBackgroundBlurFilter` silently no-ops when its runtime
+  /// `isSupported()` probe is false (a device that clears the OS gate but lacks
+  /// the segmentation capability). We check the SAME probe first and only flip
+  /// [effect] when blur really applied, so the control never shows "on" while
+  /// nothing changed. Returns false if unsupported or disposed mid-call.
+  Future<bool> applyBlur(BlurIntensity intensity) async {
+    if (_disposed) return false;
+    if (!await _manager.isSupported()) return false;
+    if (_disposed) return false;
     await _manager.applyBackgroundBlurFilter(intensity);
-    if (_disposed) return;
+    if (_disposed) return false;
     effect.value = switch (intensity) {
       BlurIntensity.light => BackgroundEffect.blurLight,
       BlurIntensity.medium => BackgroundEffect.blurMedium,
       BlurIntensity.heavy => BackgroundEffect.blurHeavy,
     };
+    return true;
   }
 
   /// Phase-2 capability (preset/custom images). Not used by Phase-1 UI.

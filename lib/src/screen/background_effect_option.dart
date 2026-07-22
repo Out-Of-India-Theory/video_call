@@ -37,8 +37,21 @@ class BackgroundEffectOption extends StatelessWidget {
           tooltip: on ? 'Turn off blur' : 'Blur background',
           isSelected: on,
           icon: Icon(on ? Icons.blur_on : Icons.blur_off),
-          onPressed: () =>
-              on ? effects.clear() : effects.applyBlur(BlurIntensity.heavy),
+          // Await + guard: applyBlur/clear are platform-channel calls that can
+          // throw; without this the rejected Future becomes an unhandled zone
+          // error mid-call. On failure we log and leave the toggle as-is (the
+          // controller only flips its state when the effect actually applied).
+          onPressed: () async {
+            try {
+              if (on) {
+                await effects.clear();
+              } else {
+                await effects.applyBlur(BlurIntensity.heavy);
+              }
+            } catch (e, st) {
+              debugPrint('[oit_video_call] background blur toggle failed: $e\n$st');
+            }
+          },
         );
       },
     );
