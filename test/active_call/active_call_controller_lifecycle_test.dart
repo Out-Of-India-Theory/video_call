@@ -386,6 +386,66 @@ void main() {
     );
   });
 
+  group('ActiveCallController background-effects lifecycle', () {
+    late FakeCallSession session;
+    late ActiveCallController controller;
+    late OitVideoCallConfig config;
+
+    setUp(() {
+      session = FakeCallSession();
+      controller = ActiveCallController(session: session, audioRouter: FakeAudioRouter());
+      config = OitVideoCallConfig(
+        apiKey: 'k',
+        user: const VideoUser(id: 'u', name: 'U'),
+        tokenProvider: () async => 't',
+      );
+    });
+
+    test('effects is non-null after a successful connectAndJoin', () async {
+      final result = await controller.connectAndJoin(
+        config: config,
+        callId: 'c1',
+        callType: 'default',
+        audioOnly: false,
+        createIfMissing: false,
+      );
+      expect(result, isA<ConnectReady>());
+      expect(controller.effects, isNotNull);
+    });
+
+    test('effects is null after endCall', () async {
+      final result = await controller.connectAndJoin(
+        config: config,
+        callId: 'c1',
+        callType: 'default',
+        audioOnly: false,
+        createIfMissing: false,
+      );
+      expect(result, isA<ConnectReady>());
+      expect(controller.effects, isNotNull);
+
+      await controller.endCall();
+      expect(controller.state.mode, ActiveCallMode.idle);
+      expect(controller.effects, isNull);
+    });
+
+    test('effects is null after cleanupForReinit from a live call', () async {
+      final result = await controller.connectAndJoin(
+        config: config,
+        callId: 'c1',
+        callType: 'default',
+        audioOnly: false,
+        createIfMissing: false,
+      );
+      expect(result, isA<ConnectReady>());
+      expect(controller.effects, isNotNull);
+
+      controller.cleanupForReinit();
+      expect(controller.state.mode, ActiveCallMode.idle);
+      expect(controller.effects, isNull);
+    });
+  });
+
   group('ActiveCallController SDK state subscription', () {
     late FakeCallSession session;
     late ActiveCallController controller;

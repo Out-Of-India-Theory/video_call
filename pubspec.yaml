@@ -1,6 +1,6 @@
 name: oit_video_call
 description: OIT shared Flutter plugin wrapping Stream Video for Dharmayana apps.
-version: 1.4.4
+version: 1.5.0
 publish_to: 'none'
 
 environment:
@@ -10,8 +10,17 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  stream_video_flutter: ^1.4.1
-  stream_video_push_notification: ^1.4.1
+  # Stream SDK pinned EXACT (not caret) so nothing auto-updates. A caret would
+  # let `pub get`/`pub upgrade` drift the stack — e.g. filters 1.4.2 needs
+  # stream_video ^1.4.2, cascading up to stream_webrtc_flutter 3.0.1, which
+  # breaks the consumer's relocated libjingle (pinned to 145.9.0 = webrtc 3.0.0).
+  # These pin the DIRECT deps; the apps ALSO pin the transitive core
+  # (stream_video, stream_webrtc_flutter) via dependency_overrides — a package's
+  # own overrides are ignored when it is consumed as a dependency. Bump the whole
+  # Stream stack deliberately, together, with a full call-flow re-test.
+  stream_video_flutter: 1.4.1
+  stream_video_filters: 1.4.1
+  stream_video_push_notification: 1.4.1
   uuid: ^4.5.1
   permission_handler: ^12.0.1
   wakelock_plus: ^1.2.0
@@ -19,6 +28,14 @@ dependencies:
     git:
       url: https://github.com/spencerccf/app_settings.git
       ref: master
+
+# Wrapper-local pin so `flutter test` / the example resolve the SAME transitive
+# Stream core the apps ship (not a floated 3.0.1). NOTE: dependency_overrides are
+# ignored when this package is consumed as a dependency, so the consumer + mitra
+# apps repeat these same pins in their own dependency_overrides.
+dependency_overrides:
+  stream_video: 1.4.1
+  stream_webrtc_flutter: 3.0.0
 
 dev_dependencies:
   flutter_test:

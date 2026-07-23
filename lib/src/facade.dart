@@ -83,12 +83,14 @@ class OitVideoCall {
     required String apiKey,
     required VideoUser user,
     required TokenProvider tokenProvider,
+    bool enableBackgroundEffects = false,
   }) {
     final old = _controller;
     _config = OitVideoCallConfig(
       apiKey: apiKey,
       user: user,
       tokenProvider: tokenProvider,
+      enableBackgroundEffects: enableBackgroundEffects,
     );
     _controller = ActiveCallController();
     activeControllerListenable.value = _controller;
