@@ -33,10 +33,17 @@ class BackgroundEffectOption extends StatelessWidget {
       valueListenable: effects.effect,
       builder: (context, current, _) {
         final on = current != BackgroundEffect.none;
-        return IconButton(
-          tooltip: on ? 'Turn off blur' : 'Blur background',
-          isSelected: on,
+        // Render via Stream's CallControlOption so this matches the sibling
+        // controls (ToggleCameraOption etc.) — same themed ElevatedButton shape,
+        // background, and icon colors. Mirror ToggleCameraOption's enabled/
+        // disabled pattern: "on" (blur active) shows the filled icon and the
+        // theme's active colors (null => defaults), "off" shows the inactive
+        // colors, so blur-on reads the same as camera-on.
+        final theme = StreamCallControlsTheme.of(context);
+        return CallControlOption(
           icon: Icon(on ? Icons.blur_on : Icons.blur_off),
+          iconColor: on ? null : theme.inactiveOptionIconColor,
+          backgroundColor: on ? null : theme.inactiveOptionBackgroundColor,
           // Await + guard: applyBlur/clear are platform-channel calls that can
           // throw; without this the rejected Future becomes an unhandled zone
           // error mid-call. On failure we log and leave the toggle as-is (the
