@@ -51,6 +51,23 @@ class ActiveCallController extends ChangeNotifier {
   ActiveCallState _state = ActiveCallState.idle;
   ActiveCallState get state => _state;
 
+  /// Fired once when the SDK reports the call was ended by the **system** — a
+  /// backend `call.ended` with no `endedBy` user (i.e. the hard time cap) —
+  /// rather than by a participant. Set by [CallScreen] from the host's
+  /// `onSystemEnded` argument. Lives on the controller (not the screen) so the
+  /// signal survives a minimize → expand round trip: the callEvents
+  /// subscription below stays attached to the live [Call] for its whole
+  /// lifetime, even while [CallScreen] is disposed and the call is in PiP.
+  VoidCallback? onSystemEnded;
+
+  /// Subscription to the live [Call]'s events, used to detect a system end.
+  /// Attached after a successful join in [connectAndJoin] (only when
+  /// [onSystemEnded] is set), cancelled on every teardown path.
+  StreamSubscription<StreamCallEvent>? _callEventsSub;
+
+  /// Guards [onSystemEnded] so it fires at most once per call.
+  bool _systemEndSignaled = false;
+
   /// Monotonically increasing token used by [connectAndJoin] to detect
   /// cancellation. [endCall] / [reset] bump it; the running attempt sees the
   /// mismatch after its next `await`, cleans up any partially-constructed
@@ -254,6 +271,11 @@ class ActiveCallController extends ChangeNotifier {
     if (stale != null) unawaited(stale.cancel());
     _callStateSub = call.state.listen(_onSdkCallStateChanged);
 
+    // Watch the coordinator's call events for a system end. Kept here (not in
+    // CallScreen) so it outlives the screen — a hard-cap end that arrives while
+    // the call is minimized / in PiP is still detected. See [_watchSystemEnd].
+    _watchSystemEnd(call);
+
     // Start managing audio output (connected headset, else loudspeaker).
     // Fire-and-forget: route application is best-effort and must not block the
     // call from rendering as connected.
@@ -293,6 +315,50 @@ class ActiveCallController extends ChangeNotifier {
       notifyListeners();
       return;
     }
+  }
+
+  /// Subscribes to the live call's coordinator events to detect a **system**
+  /// end — a backend `call.ended` with no `endedBy` user (the hard time cap) —
+  /// and fires [onSystemEnded] once.
+  ///
+  /// This is the *only* sound way to classify the end: the SDK collapses every
+  /// call-ended scenario (system cap, host end-for-everyone) to
+  /// `DisconnectReason.ended()` on the [Call.state] stream, discarding who
+  /// ended it (see `stream_video/.../disconnect_reason.dart` — `ended()` carries
+  /// no user). The coordinator [StreamCallEndedEvent] is the one place `endedBy`
+  /// survives, and it is emitted on [Call.callEvents] *before* the state flips
+  /// to disconnected, so this classifier always sees the truth first.
+  ///
+  /// A participant leave (user or jyotishi end-for-everyone) carries an
+  /// `endedByUserId`, so it is ignored here; network drops surface as other
+  /// disconnect reasons, not a call-ended event. No-op when [onSystemEnded] is
+  /// null (the host wants no system-end signal).
+  void _watchSystemEnd(Call call) {
+    if (onSystemEnded == null) return;
+    _systemEndSignaled = false;
+    final stale = _callEventsSub;
+    _callEventsSub = null;
+    if (stale != null) unawaited(stale.cancel());
+    _callEventsSub = call.callEvents.listen((event) {
+      if (event is StreamCallEndedEvent) {
+        final bySystem = event.endedByUserId == null;
+        debugPrint(
+          '[oit_video_call] callEvents → StreamCallEndedEvent '
+          'endedByUserId=${event.endedByUserId} reason=${event.reason} '
+          'bySystem=$bySystem',
+        );
+        if (bySystem) _signalSystemEnd();
+      }
+    });
+  }
+
+  /// Fires [onSystemEnded] at most once per call. Reset when a fresh call
+  /// connects (see [connectAndJoin]).
+  void _signalSystemEnd() {
+    if (_systemEndSignaled) return;
+    _systemEndSignaled = true;
+    debugPrint('[oit_video_call] system end → firing onSystemEnded');
+    onSystemEnded?.call();
   }
 
   /// Kept for callers that want to flip into `connecting` without performing
@@ -442,6 +508,14 @@ class ActiveCallController extends ChangeNotifier {
     final sub = _callStateSub;
     _callStateSub = null;
     if (sub != null) unawaited(sub.cancel());
+    // NOTE: we deliberately do NOT cancel `_callEventsSub` here. A backend
+    // hard-cap end reaches us as a coordinator `call.ended` event that the SDK
+    // *emits asynchronously* and then — in the same synchronous turn — flips
+    // `call.state` to disconnected, which is what triggered this `endCall`.
+    // Cancelling the events subscription now would drop that still-pending
+    // ended event before it delivers, so `onSystemEnded` would never fire on
+    // the very path it exists for. Cancelling it AFTER the teardown `await`s
+    // below lets the event drain and fire first. See [_cancelEventsSub].
     // Stop audio-route management before we tear the call down.
     unawaited(_audioRouter.detach());
     final call = _state.call;
@@ -481,8 +555,21 @@ class ActiveCallController extends ChangeNotifier {
       // best-effort — never let teardown errors bubble up to callers.
       // Apps should be able to call endCall without wrapping in try/catch.
     }
+    // Cancel the system-end watcher only now — the `await`s above yielded to
+    // the event queue, so a coordinator `call.ended` that arrived in the same
+    // turn as the disconnect has already delivered and fired `onSystemEnded`
+    // (once, guarded). See the note where `_callStateSub` is cancelled above.
+    _cancelEventsSub();
     _state = ActiveCallState.idle;
     notifyListeners();
+  }
+
+  /// Cancels the system-end callEvents subscription, if any. Fire-and-forget
+  /// (`unawaited`) for the same `FakeAsync` reason as [_callStateSub].
+  void _cancelEventsSub() {
+    final eventsSub = _callEventsSub;
+    _callEventsSub = null;
+    if (eventsSub != null) unawaited(eventsSub.cancel());
   }
 
   /// Synchronous teardown for the "facade is being re-initialized" path.
@@ -516,6 +603,7 @@ class ActiveCallController extends ChangeNotifier {
     final sub = _callStateSub;
     _callStateSub = null;
     if (sub != null) unawaited(sub.cancel());
+    _cancelEventsSub();
     // Stop audio-route management before we tear the call down.
     unawaited(_audioRouter.detach());
     final call = _state.call;
@@ -542,6 +630,7 @@ class ActiveCallController extends ChangeNotifier {
     // late-disconnect re-entry is cheap.
     unawaited(_callStateSub?.cancel());
     _callStateSub = null;
+    _cancelEventsSub();
     unawaited(_audioRouter.detach());
     _state = ActiveCallState.idle;
     notifyListeners();

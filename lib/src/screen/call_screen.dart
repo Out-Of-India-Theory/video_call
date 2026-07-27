@@ -68,6 +68,12 @@ class CallScreen extends StatefulWidget {
   /// "2 minutes left" nudge or the jyotishi app's always-on countdown bar.
   /// This package neither ends the call at any cap (the backend owns
   /// termination) nor interprets the overlay; it just draws it.
+  ///
+  /// It is pinned full-width just below the call app bar and stacked above the
+  /// waiting banner in an unbounded [Column], so **the host is responsible for
+  /// keeping it compact**: a tall overlay extends down over the call content,
+  /// and any opaque/hit-testable region intercepts taps meant for the video
+  /// below it (wrap non-interactive content in an [IgnorePointer]).
   final Widget? callOverlay;
 
   /// Invoked once when the SDK reports the call was ended by the **system** —
@@ -120,18 +126,18 @@ class _CallScreenState extends State<CallScreen> {
   /// goes through instead of being re-intercepted into confirmLeave.
   bool _leaveInProgress = false;
 
-  /// Subscription to the live call's events, used to detect a system end.
-  /// Only attached when [CallScreen.onSystemEnded] is supplied.
-  StreamSubscription<StreamCallEvent>? _callEventsSub;
-
-  /// Guards [CallScreen.onSystemEnded] so it fires at most once.
-  bool _systemEndSignaled = false;
-
   @override
   void initState() {
     super.initState();
     _gate = widget.deps?.permissionGate ?? RealPermissionGate();
     _openSettings = widget.deps?.openSettings ?? openAppSettings;
+    // System-end detection lives on the controller (which outlives this
+    // screen) so a hard-cap end that arrives while the call is minimized / in
+    // PiP is still detected. Wire the host's callback before [_start] so the
+    // controller's callEvents subscription is attached with it in place. On a
+    // tap-to-expand remount this re-sets the same callback — harmless, and the
+    // controller's already-live subscription keeps running untouched.
+    _controller.onSystemEnded = widget.onSystemEnded;
     _controller.addListener(_onControllerChanged);
     // Keep the screen on for the duration of the call screen's lifetime.
     // Disabled in dispose. Fire-and-forget — wakelock_plus catches platform
@@ -219,47 +225,6 @@ class _CallScreenState extends State<CallScreen> {
         ConnectErrored(:final code, :final message) => _Errored(code, message),
       };
     });
-    if (result is ConnectReady) _watchSystemEnd(result.call);
-  }
-
-  /// Subscribes to the live call's events to detect a **system** end — a
-  /// backend `call.ended` with no `endedBy` user (the hard time cap) — and
-  /// fires [CallScreen.onSystemEnded] once. A participant leave (user or
-  /// jyotishi) carries an `endedByUserId`, so it is ignored here; network
-  /// drops surface as other disconnect reasons, not a call-ended event.
-  /// No-op when the host wants no system-end signal.
-  void _watchSystemEnd(Call call) {
-    if (widget.onSystemEnded == null) return;
-    _callEventsSub?.cancel();
-    _callEventsSub = call.callEvents.listen((event) {
-      if (event is StreamCallEndedEvent) {
-        final bySystem = event.endedByUserId == null;
-        debugPrint(
-          '[oit_video_call] callEvents → StreamCallEndedEvent '
-          'endedByUserId=${event.endedByUserId} reason=${event.reason} '
-          'bySystem=$bySystem',
-        );
-        if (bySystem) _signalSystemEnd();
-      }
-    });
-  }
-
-  /// Fires [CallScreen.onSystemEnded] at most once. Reached from two paths that
-  /// each can win the race when the backend ends the call at the hard cap:
-  /// - the coordinator `call.ended` event on [Call.callEvents] (emitted before
-  ///   the status flips), and
-  /// - [_onCallDisconnected] with an "ended" reason (when the SFU delivers the
-  ///   end first, the status flips — and the screen pops and disposes the
-  ///   events subscription — before that coordinator event arrives).
-  ///
-  /// A participant leave disconnects with `DisconnectReason.cancelled` and a
-  /// network drop with a failure/timeout, so neither path mistakes those for a
-  /// system termination.
-  void _signalSystemEnd() {
-    if (_systemEndSignaled) return;
-    _systemEndSignaled = true;
-    debugPrint('[oit_video_call] system end → firing onSystemEnded');
-    widget.onSystemEnded?.call();
   }
 
   void _onControllerChanged() {
@@ -279,10 +244,11 @@ class _CallScreenState extends State<CallScreen> {
 
   @override
   void dispose() {
-    unawaited(_callEventsSub?.cancel());
     _controller.removeListener(_onControllerChanged);
     WakelockPlus.disable();
-    // No `leaveCall` here — controller owns the call lifecycle now.
+    // No `leaveCall` here — controller owns the call lifecycle now. The
+    // system-end callEvents subscription lives on the controller too, so it
+    // survives this dispose (e.g. a hard-cap end while minimized).
     super.dispose();
   }
 
@@ -378,22 +344,16 @@ class _CallScreenState extends State<CallScreen> {
   /// re-enters our PopScope and shows confirmLeave for an already-ended
   /// call, leaving the screen stuck on "Connecting" if the user cancels.
   void _onCallDisconnected(CallDisconnectedProperties props) {
-    // A backend `call.end()` at the hard cap surfaces as a disconnect whose
-    // reason is `ended`, on whichever socket (coordinator or SFU) delivers it
-    // first. This is the robust system-end signal — the coordinator
-    // `call.callEvents` path (see [_watchSystemEnd]) can be missed if the SFU
-    // wins and this pop disposes the subscription first. A participant leave is
-    // `cancelled`, a drop is a failure/timeout, so those don't fire it.
-    final reason = props.reason;
-    final bySystem =
-        reason is DisconnectReasonEnded || reason is DisconnectReasonCallEnded;
+    // Just pop — system-end classification is NOT done here. The SDK collapses
+    // every call-ended scenario (system hard-cap AND jyotishi
+    // end-for-everyone) to `DisconnectReason.ended()`, discarding `endedBy`, so
+    // this reason cannot tell them apart and would fire `onSystemEnded` on a
+    // normal jyotishi end. The sound signal is the coordinator
+    // `StreamCallEndedEvent.endedBy`, watched on the controller
+    // ([ActiveCallController._watchSystemEnd]) which outlives this screen.
     debugPrint(
-      '[oit_video_call] onCallDisconnected → reason=${reason.runtimeType} '
-      'bySystem=$bySystem',
+      '[oit_video_call] onCallDisconnected → reason=${props.reason.runtimeType}',
     );
-    if (bySystem) {
-      _signalSystemEnd();
-    }
     _triggerPop();
   }
 

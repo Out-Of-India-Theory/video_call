@@ -11,6 +11,42 @@ import 'package:stream_video_flutter/stream_video_flutter.dart';
 import '../screen/fake_call_session.dart';
 import 'fake_audio_router.dart';
 
+/// Builds a coordinator [StreamCallEndedEvent] for the system-end tests.
+/// [endedBy] is the user id that ended the call (`null` = the backend/system
+/// hard cap, which is what should fire `onSystemEnded`).
+StreamCallEndedEvent callEndedEvent({required String? endedBy}) {
+  final cid = StreamCallCid(cid: 'default:c1');
+  return StreamCallEndedEvent(
+    cid,
+    endedBy: endedBy == null
+        ? null
+        : CallUser(id: endedBy, name: endedBy, roles: const [], image: ''),
+    createdAt: DateTime(2026),
+    metadata: CallMetadata(
+      cid: cid,
+      details: const CallDetails(
+        createdBy: CallUser(id: 'u', name: 'U', roles: [], image: ''),
+        team: '',
+        ownCapabilities: [],
+        blockedUserIds: [],
+        broadcasting: false,
+        recording: false,
+        backstage: false,
+        transcribing: false,
+        captioning: false,
+        egress: CallEgress(),
+        custom: {},
+        rtmpIngress: '',
+      ),
+      settings: const CallSettings(),
+      session: const CallSessionData(),
+      users: const {},
+      members: const {},
+    ),
+    type: 'call.ended',
+  );
+}
+
 void main() {
   group('ActiveCallController.connectAndJoin', () {
     late FakeCallSession session;
@@ -485,6 +521,127 @@ void main() {
         expect(controller.state.call, isNull);
       },
     );
+  });
+
+  group('ActiveCallController.onSystemEnded', () {
+    late FakeCallSession session;
+    late ActiveCallController controller;
+    late OitVideoCallConfig config;
+
+    setUp(() {
+      session = FakeCallSession();
+      controller = ActiveCallController(session: session, audioRouter: FakeAudioRouter());
+      config = OitVideoCallConfig(
+        apiKey: 'k',
+        user: const VideoUser(id: 'u', name: 'U'),
+        tokenProvider: () async => 't',
+      );
+    });
+
+    Future<void> connect() => controller.connectAndJoin(
+          config: config,
+          callId: 'c1',
+          callType: 'default',
+          audioOnly: false,
+          createIfMissing: false,
+        );
+
+    // The fake's callEvents emitter is async (sync: false), matching the real
+    // SDK — so a pushed event delivers on the next microtask, not inline.
+    Future<void> pumpEvents() => Future<void>.delayed(Duration.zero);
+
+    test('coordinator call.ended with no endedBy fires onSystemEnded once', () async {
+      var fired = 0;
+      controller.onSystemEnded = () => fired++;
+      await connect();
+
+      // System hard-cap end: coordinator StreamCallEndedEvent with endedBy=null.
+      session.pushCallEvent(callEndedEvent(endedBy: null));
+      await pumpEvents();
+      expect(fired, 1);
+
+      // A duplicate event (e.g. SFU + coordinator both surface) must not
+      // re-fire — the controller guards it to at most once per call.
+      session.pushCallEvent(callEndedEvent(endedBy: null));
+      await pumpEvents();
+      expect(fired, 1);
+    });
+
+    test('jyotishi end-for-everyone (endedBy set) does NOT fire onSystemEnded', () async {
+      var fired = 0;
+      controller.onSystemEnded = () => fired++;
+      await connect();
+
+      // The SDK collapses this to DisconnectReason.ended() on the state
+      // stream (indistinguishable from a hard cap), but the coordinator event
+      // carries endedBy — so the controller correctly stays silent. This is
+      // the P1 false-positive the disconnect-reason path used to produce.
+      session.pushCallEvent(callEndedEvent(endedBy: 'jyotishi-1'));
+      await pumpEvents();
+      expect(fired, 0);
+    });
+
+    test('no callback set → call.ended is a silent no-op', () async {
+      await connect();
+      // Must not throw even though onSystemEnded is null (subscription is
+      // never attached in that case).
+      session.pushCallEvent(callEndedEvent(endedBy: null));
+      await pumpEvents();
+      expect(controller.state.mode, ActiveCallMode.connected);
+    });
+
+    test('system end while minimized still fires (survives screen dispose)', () async {
+      var fired = 0;
+      controller.onSystemEnded = () => fired++;
+      await connect();
+      // Simulate user back-press → PiP. The CallScreen would be disposed here,
+      // but the callEvents subscription lives on the controller so detection
+      // keeps working.
+      expect(controller.minimize(), isTrue);
+
+      session.pushCallEvent(callEndedEvent(endedBy: null));
+      await pumpEvents();
+      expect(fired, 1);
+    });
+
+    test(
+      'coordinator hard-cap: ended event + disconnect in same turn still fires',
+      () async {
+        // Regression for the endCall/system-end race. The SDK emits the
+        // coordinator `call.ended` event ASYNCHRONOUSLY and, in the SAME
+        // synchronous turn, flips `call.state` to disconnected (synchronous),
+        // which triggers `endCall`. If `endCall` cancelled the events
+        // subscription synchronously, the still-pending ended event would be
+        // dropped and onSystemEnded would never fire on the exact path it
+        // exists for. endCall must defer that cancel past its teardown awaits.
+        var fired = 0;
+        controller.onSystemEnded = () => fired++;
+        await connect();
+
+        // Emit ended (async, queued) then flip state (sync → drives endCall).
+        session.pushCallEvent(callEndedEvent(endedBy: null));
+        session.pushCallStatus(
+          CallStatus.disconnected(DisconnectReason.ended()),
+        );
+        await pumpEvents();
+        await pumpEvents();
+
+        expect(fired, 1);
+        expect(controller.state.mode, ActiveCallMode.idle);
+      },
+    );
+
+    test('endCall cancels the events subscription (no fire after teardown)', () async {
+      var fired = 0;
+      controller.onSystemEnded = () => fired++;
+      await connect();
+      await controller.endCall();
+
+      // Emitting after teardown must not reach the (cancelled) listener.
+      session.pushCallEvent(callEndedEvent(endedBy: null));
+      await pumpEvents();
+      expect(fired, 0);
+    });
   });
 
   group('ActiveCallState equality', () {

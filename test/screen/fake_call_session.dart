@@ -2,6 +2,13 @@ import 'dart:async';
 
 import 'package:mocktail/mocktail.dart';
 import 'package:oit_video_call/src/screen/call_session.dart';
+// `SharedEmitter` / `MutableSharedEmitterImpl` are not re-exported by the
+// public barrel, so the fake reaches into the SDK's src to back
+// `Call.callEvents` with a real, pushable emitter for tests. `stream_video` is
+// always present as a transitive dep of `stream_video_flutter`, so no explicit
+// dependency is needed — just silence the two lints the direct src import trips.
+// ignore: implementation_imports, depend_on_referenced_packages
+import 'package:stream_video/src/shared_emitter.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
 
 /// In-memory [CallSession] for unit tests.
@@ -62,6 +69,16 @@ class FakeCallSession implements CallSession {
     if (call == null) return;
     final current = call.state.value;
     call.stateNotifier.value = current.copyWith(status: status);
+  }
+
+  /// Emits a synthetic [StreamCallEvent] through the emitter behind the
+  /// most-recently-issued fake [Call]. Tests use this to drive
+  /// `ActiveCallController._watchSystemEnd` (e.g. a coordinator `call.ended`
+  /// with or without an `endedBy` user) without a real SDK connection.
+  ///
+  /// No-op if [getCall] / [getOrCreateCall] hasn't issued a call yet.
+  void pushCallEvent(StreamCallEvent event) {
+    _call?.callEventsEmitter.emit(event);
   }
 
   /// Pushes a synthetic [CallState] update that swaps the participant list.
@@ -160,8 +177,22 @@ class _FakeCall extends Mock implements Call {
   /// can subscribe and push transitions. Exposed via [state].
   final _FakeStateEmitter<CallState> stateNotifier;
 
+  /// Real, mutable event emitter so the controller's system-end watcher can
+  /// subscribe and tests can push coordinator `call.ended` events. Left at the
+  /// SDK default (`sync: false`, i.e. ASYNCHRONOUS delivery) to faithfully
+  /// reproduce production: the real `Call.callEvents` emits asynchronously
+  /// while `Call.state` is synchronous, and that ordering is exactly what the
+  /// endCall/system-end teardown race hinges on. Tests must pump a microtask
+  /// (e.g. `await Future<void>.delayed(Duration.zero)`) after [pushCallEvent].
+  /// Exposed via [callEvents].
+  final MutableSharedEmitterImpl<StreamCallEvent> callEventsEmitter =
+      MutableSharedEmitterImpl<StreamCallEvent>();
+
   @override
   StateEmitter<CallState> get state => stateNotifier;
+
+  @override
+  SharedEmitter<StreamCallEvent> get callEvents => callEventsEmitter;
 }
 
 /// Test-only [MutableStateEmitter] backed by a broadcast [StreamController].
