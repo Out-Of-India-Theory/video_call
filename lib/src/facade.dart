@@ -29,6 +29,8 @@ class CallScreenArgs {
     required this.onCallEnded,
     required this.confirmLeave,
     required this.waitingForOtherParticipant,
+    required this.callOverlay,
+    required this.onSystemEnded,
   });
 
   final String callId;
@@ -38,6 +40,8 @@ class CallScreenArgs {
   final VoidCallback? onCallEnded;
   final Future<bool> Function(BuildContext context)? confirmLeave;
   final Widget? waitingForOtherParticipant;
+  final Widget? callOverlay;
+  final VoidCallback? onSystemEnded;
 }
 
 class OitVideoCall {
@@ -257,6 +261,8 @@ class OitVideoCall {
     VoidCallback? onCallEnded,
     Future<bool> Function(BuildContext context)? confirmLeave,
     Widget? waitingForOtherParticipant,
+    Widget? callOverlay,
+    VoidCallback? onSystemEnded,
   }) {
     if (_config == null || _controller == null) {
       return const Scaffold(
@@ -278,6 +284,8 @@ class OitVideoCall {
       onCallEnded: onCallEnded,
       confirmLeave: confirmLeave,
       waitingForOtherParticipant: waitingForOtherParticipant,
+      callOverlay: callOverlay,
+      onSystemEnded: onSystemEnded,
     );
     return CallScreen(
       config: _config!,
@@ -289,6 +297,8 @@ class OitVideoCall {
       onCallEnded: onCallEnded,
       confirmLeave: confirmLeave,
       waitingForOtherParticipant: waitingForOtherParticipant,
+      callOverlay: callOverlay,
+      onSystemEnded: onSystemEnded,
     );
   }
 }

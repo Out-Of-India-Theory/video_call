@@ -34,6 +34,8 @@ class CallScreen extends StatefulWidget {
     this.onCallEnded,
     this.confirmLeave,
     this.waitingForOtherParticipant,
+    this.callOverlay,
+    this.onSystemEnded,
     @visibleForTesting this.deps,
   });
 
@@ -60,6 +62,27 @@ class CallScreen extends StatefulWidget {
   /// Optional widget rendered over the call screen while the local user is
   /// alone in the call (no remote participants yet).
   final Widget? waitingForOtherParticipant;
+
+  /// Optional widget rendered persistently over the live call (below the
+  /// call app bar) for the whole connected duration. The host owns its
+  /// content, timing, dismissal, and copy — e.g. the user app's dismissable
+  /// "2 minutes left" nudge or the jyotishi app's always-on countdown bar.
+  /// This package neither ends the call at any cap (the backend owns
+  /// termination) nor interprets the overlay; it just draws it.
+  ///
+  /// It is pinned full-width just below the call app bar and stacked above the
+  /// waiting banner in an unbounded [Column], so **the host is responsible for
+  /// keeping it compact**: a tall overlay extends down over the call content,
+  /// and any opaque/hit-testable region intercepts taps meant for the video
+  /// below it (wrap non-interactive content in an [IgnorePointer]).
+  final Widget? callOverlay;
+
+  /// Invoked once when the SDK reports the call was ended by the **system** —
+  /// a backend `call.ended` with no `endedBy` user (i.e. the hard time cap) —
+  /// rather than by a participant. Lets the host distinguish a system
+  /// termination (→ e.g. rebook / "time complete") from a user/jyotishi leave
+  /// or a network drop, for which it is NOT called.
+  final VoidCallback? onSystemEnded;
 
   @visibleForTesting
   final CallScreenDeps? deps;
@@ -109,6 +132,13 @@ class _CallScreenState extends State<CallScreen> {
     super.initState();
     _gate = widget.deps?.permissionGate ?? RealPermissionGate();
     _openSettings = widget.deps?.openSettings ?? openAppSettings;
+    // System-end detection lives on the controller (which outlives this
+    // screen) so a hard-cap end that arrives while the call is minimized / in
+    // PiP is still detected. Wire the host's callback before [_start] so the
+    // controller's callEvents subscription is attached with it in place. On a
+    // tap-to-expand remount this re-sets the same callback — harmless, and the
+    // controller's already-live subscription keeps running untouched.
+    _controller.onSystemEnded = widget.onSystemEnded;
     _controller.addListener(_onControllerChanged);
     // Keep the screen on for the duration of the call screen's lifetime.
     // Disabled in dispose. Fire-and-forget — wakelock_plus catches platform
@@ -217,7 +247,9 @@ class _CallScreenState extends State<CallScreen> {
   void dispose() {
     _controller.removeListener(_onControllerChanged);
     WakelockPlus.disable();
-    // No `leaveCall` here — controller owns the call lifecycle now.
+    // No `leaveCall` here — controller owns the call lifecycle now. The
+    // system-end callEvents subscription lives on the controller too, so it
+    // survives this dispose (e.g. a hard-cap end while minimized).
     super.dispose();
   }
 
@@ -312,7 +344,17 @@ class _CallScreenState extends State<CallScreen> {
   /// this, the SDK's default would be `Navigator.maybePop` which
   /// re-enters our PopScope and shows confirmLeave for an already-ended
   /// call, leaving the screen stuck on "Connecting" if the user cancels.
-  void _onCallDisconnected(CallDisconnectedProperties _) {
+  void _onCallDisconnected(CallDisconnectedProperties props) {
+    // Just pop — system-end classification is NOT done here. The SDK collapses
+    // every call-ended scenario (system hard-cap AND jyotishi
+    // end-for-everyone) to `DisconnectReason.ended()`, discarding `endedBy`, so
+    // this reason cannot tell them apart and would fire `onSystemEnded` on a
+    // normal jyotishi end. The sound signal is the coordinator
+    // `StreamCallEndedEvent.endedBy`, watched on the controller
+    // ([ActiveCallController._watchSystemEnd]) which outlives this screen.
+    debugPrint(
+      '[oit_video_call] onCallDisconnected → reason=${props.reason.runtimeType}',
+    );
     _triggerPop();
   }
 
@@ -375,16 +417,29 @@ class _CallScreenState extends State<CallScreen> {
                 ),
               ),
             ),
-            // Offset by status bar + Material AppBar height so the banner sits just below
-            // Stream's CallAppBar instead of overlapping the back/leave controls.
-            if (widget.waitingForOtherParticipant != null)
+            // Offset by status bar + Material AppBar height so the overlays sit
+            // just below Stream's CallAppBar instead of overlapping the
+            // back/leave controls. The host-owned persistent overlay
+            // (time-limit nudge / countdown bar) and the waiting banner stack
+            // vertically in a Column so they never overlap: the persistent
+            // overlay stays pinned on top while the waiting banner sits below
+            // and collapses to zero once the remote joins.
+            if (widget.callOverlay != null ||
+                widget.waitingForOtherParticipant != null)
               Positioned(
                 top: MediaQuery.of(context).padding.top + kToolbarHeight,
                 left: 0,
                 right: 0,
-                child: WaitingBannerGate(
-                  call: call,
-                  child: widget.waitingForOtherParticipant!,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (widget.callOverlay != null) widget.callOverlay!,
+                    if (widget.waitingForOtherParticipant != null)
+                      WaitingBannerGate(
+                        call: call,
+                        child: widget.waitingForOtherParticipant!,
+                      ),
+                  ],
                 ),
               ),
           ],
