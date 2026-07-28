@@ -702,6 +702,52 @@ void main() {
       await pumpEvents();
       expect(fired, 0);
     });
+
+    test(
+      'server auto-end (SFU-only ended, no coordinator event) fires onSystemEnded',
+      () async {
+        // The production hard-cap path: the backend ends the call and the SDK
+        // surfaces it as `DisconnectReason.ended()` on the SFU-driven state
+        // stream WITHOUT emitting a coordinator `StreamCallEndedEvent`. The
+        // callEvents path never sees it, so classification must come from the
+        // disconnect reason on the state subscription.
+        var fired = 0;
+        controller.onSystemEnded = () => fired++;
+        await connect();
+
+        session.pushCallStatus(
+          CallStatus.disconnected(DisconnectReason.ended()),
+        );
+        await pumpEvents();
+        await pumpEvents();
+
+        expect(fired, 1);
+        expect(controller.state.mode, ActiveCallMode.idle);
+      },
+    );
+
+    test(
+      'local leave (cancelled reason) does NOT fire onSystemEnded',
+      () async {
+        // A user/jyotishi leave disconnects with `cancelled`, not `ended`, so
+        // the disconnect-reason classifier must stay silent even if such a
+        // status reaches the state stream.
+        var fired = 0;
+        controller.onSystemEnded = () => fired++;
+        await connect();
+
+        session.pushCallStatus(
+          CallStatus.disconnected(
+            const DisconnectReason.cancelled(byUserId: 'u'),
+          ),
+        );
+        await pumpEvents();
+        await pumpEvents();
+
+        expect(fired, 0);
+        expect(controller.state.mode, ActiveCallMode.idle);
+      },
+    );
   });
 
   group('ActiveCallState equality', () {
