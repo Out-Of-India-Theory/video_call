@@ -312,6 +312,20 @@ class ActiveCallController extends ChangeNotifier {
   void _onSdkCallStateChanged(CallState cs) {
     final status = cs.status;
     if (status.isDisconnected) {
+      // Classify a system end from the disconnect reason. The backend ends the
+      // call for everyone (the buffer-time hard cap) via `call.end`, which the
+      // SDK surfaces as `DisconnectReason.ended()` on the SFU-driven state
+      // stream — it does NOT emit a coordinator `StreamCallEndedEvent` on
+      // `callEvents` for this path, so [_watchSystemEnd] alone never fires. A
+      // local user/jyotishi leave disconnects with `cancelled` and a network
+      // drop with `failure`/`timeout`, so neither is mistaken for a system end.
+      // (Guarded by [_systemEndSignaled], so it can't double-fire with the
+      // coordinator path.)
+      final reason = (status as CallStatusDisconnected).reason;
+      if (reason is DisconnectReasonEnded ||
+          reason is DisconnectReasonCallEnded) {
+        _signalSystemEnd();
+      }
       unawaited(endCall());
       return;
     }
