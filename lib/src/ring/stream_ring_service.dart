@@ -105,10 +105,19 @@ class StreamRingService {
   /// screen for it (order fetch failed, route errored, screen crashed) would
   /// otherwise leave the hardware held indefinitely with no UI to release it.
   ///
-  /// Generous on purpose: an accept from a cold start has to boot the app, load
-  /// the consultation and mount the screen. Measured worst case is a few
-  /// seconds, so a minute leaves ample headroom while still bounding the leak.
-  static const Duration orphanedAcceptTimeout = Duration(seconds: 60);
+  /// Deliberately far longer than a healthy accept needs, because the two
+  /// failures are not symmetric: releasing too late leaves camera and mic held a
+  /// while longer, whereas releasing too EARLY hangs up a call the user was
+  /// about to be taken into.
+  ///
+  /// The slow path is longer than it looks. Both host apps hold ring-accept
+  /// navigation until home has finished loading, and the consumer's video-call
+  /// module is a Play on-demand component that has been seen to stall — so
+  /// accept → home-ready → order load → `joinCall` is not bounded by anything
+  /// this package controls. Three minutes still turns an unbounded hold (45
+  /// minutes was observed) into a bounded one, while making a false release
+  /// unlikely enough not to trade one bug for a worse one.
+  static const Duration orphanedAcceptTimeout = Duration(seconds: 180);
 
   /// Bounds how long the accepted call may go unclaimed. Resolves the call from
   /// [_acceptedCall] at expiry rather than capturing it, so a superseding accept
@@ -143,9 +152,16 @@ class StreamRingService {
   /// For hosts that KNOW they failed — a consultation whose order will not
   /// load, say — this releases immediately instead of waiting out
   /// [orphanedAcceptTimeout].
+  /// Refuses once the host has CLAIMED the call, i.e. a call screen is up for
+  /// it. Without that guard this leaves whatever call is latched, and a claim
+  /// does not clear the latch — so a caller reaching this after a successful
+  /// join would hang up a live conversation. Being unclaimed is the whole
+  /// premise of "the host cannot show it", so requiring it costs nothing: the
+  /// order-failed and screen-gone callers both run before any join.
   Future<bool> leaveAcceptedCall(String callId) async {
     final call = _acceptedCall;
     if (call == null || call.id != callId) return false;
+    if (_claimWatchdog.guardedCallId != callId) return false;
     await _releaseOrphanedCall(call, reason: 'host could not show it');
     return true;
   }

@@ -181,13 +181,15 @@ void main() {
       });
     });
 
-    test('the production timeout is generous enough for a cold-start mount', () {
-      // Accept → app boot → consultation load → call screen measured a few
-      // seconds on a real device. The timeout only has to bound the leak, so it
-      // must stay well clear of a slow-but-legitimate mount: shortening this
-      // would leave a call the user was about to see.
+    test('the production timeout stays far clear of a slow accept', () {
+      // The two failure directions are NOT symmetric: releasing late leaves
+      // camera and mic held a while longer, releasing early hangs up a call the
+      // user was about to be taken into. And the slow path is not bounded by
+      // this package — both hosts hold ring-accept navigation until home has
+      // loaded, and the consumer's video-call module is an on-demand component
+      // that can stall. Lowering this trades one bug for a worse one.
       expect(StreamRingService.orphanedAcceptTimeout.inSeconds,
-          greaterThanOrEqualTo(30));
+          greaterThanOrEqualTo(120));
     });
   });
 }
