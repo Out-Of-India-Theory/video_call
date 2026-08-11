@@ -587,18 +587,6 @@ class StreamRingService {
   }
 }
 
-/// Decides whether an incoming "ring accepted" should be delivered to the host
-/// app (which navigates into the call).
-///
-/// Two SDK mechanisms can report the SAME accept — the live
-/// `observeCallAcceptRingingEvent` observer and the cold-start
-/// `consumeAndAcceptActiveCall` poll — so a "deliver once" guard is needed to
-/// avoid double-navigation. Crucially that guard must RE-ARM when the accepted
-/// call ends: a consultation reuses ONE call cid (`default:<orderId>`) across
-/// rings (server T-5, server/mitra T+2 re-ring), so a process-lifetime latch
-/// dropped every accept after the first and the app never navigated into the
-/// rejoined call (issue #5205). Pure + synchronous so it is unit-testable
-/// without the `StreamVideo` singleton.
 /// What to do with an incoming accept, per [AcceptArming.decide].
 ///
 /// Reported rather than inferred because the two drop reasons need OPPOSITE
@@ -673,6 +661,18 @@ class OrphanClaimWatchdog {
   }
 }
 
+/// Decides whether an incoming "ring accepted" should be delivered to the host
+/// app (which navigates into the call).
+///
+/// Two SDK mechanisms can report the SAME accept — the live
+/// `observeCallAcceptRingingEvent` observer and the cold-start
+/// `consumeAndAcceptActiveCall` poll — so a "deliver once" guard is needed to
+/// avoid double-navigation. Crucially that guard must RE-ARM when the accepted
+/// call ends: a consultation reuses ONE call cid (`default:<orderId>`) across
+/// rings (server T-5, server/mitra T+2 re-ring), so a process-lifetime latch
+/// dropped every accept after the first and the app never navigated into the
+/// rejoined call (issue #5205). Pure + synchronous so it is unit-testable
+/// without the `StreamVideo` singleton.
 @visibleForTesting
 class AcceptArming {
   String? _inFlightCallId;
