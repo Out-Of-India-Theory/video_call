@@ -151,6 +151,13 @@ class StreamCallSession implements CallSession {
 
   @override
   Future<void> joinCall(Call call) async {
+    // Reaching the join step means the host has a call screen up for this call,
+    // so the ring service's orphan watchdog can stand down. Marked here rather
+    // than in getCall because a getCall failure leaves the accept-time join
+    // (camera + mic, no UI) with nobody to release it — exactly what the
+    // watchdog is for. Covers the early return below too: an accept-time join
+    // skips join() but the screen still owns it.
+    StreamRingService.instance.markAcceptClaimed(call.id);
     // The accept flow (iOS CallKit / Android FCM) joins the call before this
     // screen-level auto-join runs, so it may already be active. The SDK rejects
     // a second join() on an active cid ("a call with the same cid is in
