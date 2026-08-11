@@ -93,6 +93,97 @@ class StreamRingService {
   /// while one is in flight); torn down in [unregister].
   StreamSubscription<CallState>? _acceptedCallSub;
 
+  /// The call [_arming] is latched on, kept so liveness can be read at decision
+  /// time instead of trusting [_acceptedCallSub] to have fired. A call that
+  /// never joined never reports `isDisconnected`, so the subscription alone
+  /// cannot tell a live session from a dead latch.
+  Call? _acceptedCall;
+
+  /// How long an accepted call may go unclaimed by the host before the ring
+  /// service leaves it. The SDK joins during accept handling — camera and mic
+  /// go live BEFORE [onAccepted] runs — so a host that never shows a call
+  /// screen for it (order fetch failed, route errored, screen crashed) would
+  /// otherwise leave the hardware held indefinitely with no UI to release it.
+  ///
+  /// Generous on purpose: an accept from a cold start has to boot the app, load
+  /// the consultation and mount the screen. Measured worst case is a few
+  /// seconds, so a minute leaves ample headroom while still bounding the leak.
+  static const Duration orphanedAcceptTimeout = Duration(seconds: 60);
+
+  Timer? _claimTimer;
+
+  /// The accepted call the host has not claimed yet, if any.
+  String? _unclaimedCallId;
+
+  /// Whether the latched call is a real session in progress. Anything short of
+  /// joining/joined — idle, incoming, or already disconnected — means the latch
+  /// is stale and a different accept may supersede it.
+  bool get _inFlightCallIsLive {
+    final call = _acceptedCall;
+    if (call == null) return false;
+    final status = call.state.value.status;
+    return status.isAlreadyJoined || status.isJoining || status.isConnecting;
+  }
+
+  /// Signals that the host has taken ownership of [callId] — called from
+  /// [CallSession.joinCall], i.e. once a call screen is up for it — so the
+  /// orphan watchdog stands down.
+  void markAcceptClaimed(String callId) {
+    if (_unclaimedCallId != callId) return;
+    _unclaimedCallId = null;
+    _claimTimer?.cancel();
+    _claimTimer = null;
+  }
+
+  /// Leaves an accepted call the host cannot show, releasing camera and mic.
+  /// Returns false if [callId] is not the currently-accepted call.
+  ///
+  /// For hosts that KNOW they failed — a consultation whose order will not
+  /// load, say — this releases immediately instead of waiting out
+  /// [orphanedAcceptTimeout].
+  Future<bool> leaveAcceptedCall(String callId) async {
+    final call = _acceptedCall;
+    if (call == null || call.id != callId) return false;
+    await _releaseOrphanedCall(call, reason: 'host could not show it');
+    return true;
+  }
+
+  /// Arms the watchdog for a freshly delivered accept.
+  void _armOrphanWatchdog(Call call) {
+    _claimTimer?.cancel();
+    _unclaimedCallId = call.id;
+    _claimTimer = Timer(orphanedAcceptTimeout, () {
+      _claimTimer = null;
+      if (_unclaimedCallId != call.id) return;
+      unawaited(_releaseOrphanedCall(call, reason: 'unclaimed by the host'));
+    });
+  }
+
+  /// Leaves [call] and re-arms accept delivery. Best effort: the point is to
+  /// free camera and mic, and a failure here must not throw into ring handling.
+  Future<void> _releaseOrphanedCall(Call call, {required String reason}) async {
+    // Only disarm the watchdog when it belongs to THIS call: releasing a
+    // dropped accept must not disarm the watchdog guarding the in-flight one.
+    if (_unclaimedCallId == call.id) {
+      _unclaimedCallId = null;
+      _claimTimer?.cancel();
+      _claimTimer = null;
+    }
+    debugPrint('[oit_video_call] leaving orphaned accepted call ${call.id} '
+        '($reason) — releasing camera/mic');
+    try {
+      await call.leave();
+    } catch (e) {
+      debugPrint('[oit_video_call] leave of orphaned call ${call.id} '
+          'failed: $e');
+    }
+    // The call never reported `isDisconnected` to us, so the normal re-arm
+    // ([_watchAcceptedCallEnd]) will not fire. Re-arm here or this latch would
+    // black-hole every later accept.
+    _arming.callEnded(call.id);
+    if (_acceptedCall?.id == call.id) _acceptedCall = null;
+  }
+
   /// True once [register] has constructed + connected the long-lived SDK.
   ///
   /// [StreamCallSession] reads this to (a) REUSE the connection instead of
@@ -360,8 +451,21 @@ class StreamRingService {
       // when the accepted call ends, so a later ring of the SAME consultation
       // cid (server T-5/T+2 re-ring, mitra "Ring customer") navigates again
       // instead of being silently dropped (#5205).
-      if (!_arming.shouldDeliver(call.id)) return;
+      if (!_arming.shouldDeliver(
+        call.id,
+        inFlightIsLive: _inFlightCallIsLive,
+      )) {
+        // The SDK joins BEFORE this callback runs, so dropping an accept for a
+        // call that will never be shown would leave camera and mic held with
+        // nothing to release them. Never the in-flight call itself: that is the
+        // live session, or the one already handed to the host.
+        if (_arming.debugInFlightCallId != call.id) {
+          unawaited(_releaseOrphanedCall(call, reason: 'accept dropped'));
+        }
+        return;
+      }
       _watchAcceptedCallEnd(call);
+      _armOrphanWatchdog(call);
       onAccepted(call.id);
     }
 
@@ -410,9 +514,17 @@ class StreamRingService {
   /// any prior watch (only one accept is ever in flight).
   void _watchAcceptedCallEnd(Call call) {
     _acceptedCallSub?.cancel();
+    _acceptedCall = call;
     _acceptedCallSub = watchCallEnd(call, () {
       _arming.callEnded(call.id);
       _acceptedCallSub = null;
+      if (_acceptedCall?.id == call.id) _acceptedCall = null;
+      // The call ended on its own; nothing left to watch for a claim.
+      if (_unclaimedCallId == call.id) {
+        _unclaimedCallId = null;
+        _claimTimer?.cancel();
+        _claimTimer = null;
+      }
     });
   }
 
@@ -475,6 +587,10 @@ class StreamRingService {
     _acceptSub = null;
     await _acceptedCallSub?.cancel();
     _acceptedCallSub = null;
+    _acceptedCall = null;
+    _claimTimer?.cancel();
+    _claimTimer = null;
+    _unclaimedCallId = null;
     _arming.reset();
     _acceptWired = false;
     await StreamVideo.reset(disconnect: true);
@@ -500,11 +616,32 @@ class AcceptArming {
   /// True while an accept has been delivered but its call hasn't ended yet.
   bool get hasInFlight => _inFlightCallId != null;
 
-  /// Returns true the first time an accept should be delivered; false for a
-  /// duplicate report of the in-flight accept (or any accept while one is
-  /// already in flight). Re-arm via [callEnded].
-  bool shouldDeliver(String callId) {
-    if (_inFlightCallId != null) return false;
+  /// Diagnostics only: the latched call id, if any.
+  String? get debugInFlightCallId => _inFlightCallId;
+
+  /// Returns true when an accept should be delivered to the host.
+  ///
+  /// Drops a duplicate report of the in-flight accept — the live observer and
+  /// the cold-start consume poll can both report ONE accept — and drops a
+  /// *different* accept while the in-flight call is still live
+  /// ([inFlightIsLive]), so an accidental tap on a second incoming call cannot
+  /// yank someone out of the call they are in.
+  ///
+  /// A different accept DOES supersede a latch whose call is no longer live.
+  /// Without that the latch was a black hole: [callEnded] is driven by the call
+  /// reporting `isDisconnected`, which a call that never *joined* never does —
+  /// its state stays idle and it receives no updates, not even for a
+  /// server-side end. One accept whose join failed therefore silenced every
+  /// later accept for the rest of the process, while the SDK — which joins
+  /// BEFORE the accept callback runs — held camera and mic with no UI to
+  /// release them (mitra #435).
+  bool shouldDeliver(String callId, {required bool inFlightIsLive}) {
+    if (_inFlightCallId == null) {
+      _inFlightCallId = callId;
+      return true;
+    }
+    if (_inFlightCallId == callId) return false;
+    if (inFlightIsLive) return false;
     _inFlightCallId = callId;
     return true;
   }

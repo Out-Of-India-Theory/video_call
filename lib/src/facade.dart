@@ -208,6 +208,21 @@ class OitVideoCall {
     StreamRingService.instance.wireAcceptHandling(onAccepted);
   }
 
+  /// Leaves a ring-accepted call the host cannot show, releasing camera and
+  /// mic. Returns false if [callId] is not the currently-accepted call.
+  ///
+  /// Accept handling joins the call BEFORE [wireRingAccept]'s callback runs, so
+  /// camera and mic are already live by the time the host decides where to
+  /// navigate. A host that then fails to show a call screen — a consultation
+  /// whose order will not load, a route that errors — must call this, or the
+  /// hardware stays held with no UI to release it. Backed by
+  /// [StreamRingService.orphanedAcceptTimeout] for the paths a host cannot
+  /// detect (screen crash, unknown route); this just releases immediately
+  /// instead of waiting the timeout out.
+  static Future<bool> leaveAcceptedRingCall(String callId) {
+    return StreamRingService.instance.leaveAcceptedCall(callId);
+  }
+
   /// Whether the native call UI currently holds ANY incoming/active call — the
   /// signal that the app may have been cold-started / woken by a ring. Lets the
   /// host register the ring service EARLY on a cold start (before its normal
