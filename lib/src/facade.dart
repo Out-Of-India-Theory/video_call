@@ -219,6 +219,24 @@ class OitVideoCall {
     return StreamRingService.instance.hasPendingCall();
   }
 
+  /// Removes every push device registered for the current user except
+  /// [keepTokens]; returns how many were removed.
+  ///
+  /// Call after [registerRinging]. Stale tokens from old or reinstalled devices
+  /// are never cleaned up (only an explicit logout deletes one), and because
+  /// Stream rings every registered device — where a decline from ANY of them
+  /// rejects the call for the user — a single stale device can cancel a live
+  /// ring on the device the person is holding.
+  ///
+  /// OPT-IN: only for apps where one active device per user is the intended
+  /// model. Passing an empty or unregistered [keepTokens] is a no-op rather than
+  /// a mass deregistration.
+  static Future<int> pruneOtherRingDevices({
+    required Set<String> keepTokens,
+  }) {
+    return StreamRingService.instance.pruneOtherDevices(keepTokens: keepTokens);
+  }
+
   /// Whether the long-lived ring connection is active.
   static bool get isRingingRegistered => StreamRingService.instance.isActive;
 

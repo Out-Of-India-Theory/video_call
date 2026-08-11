@@ -294,6 +294,71 @@ class StreamRingService {
     return sv.handleRingingFlowNotifications(data);
   }
 
+  /// Removes every push device registered for the current user EXCEPT
+  /// [keepTokens], returning how many were removed.
+  ///
+  /// Stale devices are the problem this solves. A token is only deleted on an
+  /// explicit logout ([unregister]), so an old handset, a reinstalled phone or a
+  /// retired test device keeps its token registered indefinitely. Stream rings
+  /// EVERY registered device, and a decline from ANY of them rejects the call
+  /// for the USER — which cancels the ring on the device the person is actually
+  /// holding.
+  ///
+  /// Observed on a real account: 6 registered devices (3 of them stale iOS VoIP
+  /// tokens), every incoming ring rejected ~5s in with no local cause — no
+  /// Decline tap, nothing in the app's own logs. It survived a reboot, an app
+  /// data wipe and a fresh login, because it was never this device. Pruning to a
+  /// single device made rings sustain normally.
+  ///
+  /// OPT-IN by design: an app whose users legitimately run several devices
+  /// should not call this. It suits a single-console app (one consultant, one
+  /// active device) where the newest login should own the ring.
+  ///
+  /// Best-effort: never throws, and a failure only leaves the stale tokens in
+  /// place. Requires [register] to have run, since it needs a connected client.
+  Future<int> pruneOtherDevices({required Set<String> keepTokens}) async {
+    if (!_active) return 0;
+    try {
+      final result = await StreamVideo.instance.getDevices();
+      final devices = result.getDataOrNull();
+      if (devices == null) {
+        debugPrint('StreamRingService.pruneOtherDevices: listDevices failed');
+        return 0;
+      }
+
+      // Refuse to prune when we cannot identify our own token: deleting every
+      // device would unregister the caller itself and stop its rings.
+      final keep = keepTokens.where((t) => t.isNotEmpty).toSet();
+      if (keep.isEmpty) {
+        debugPrint('StreamRingService.pruneOtherDevices: no keepTokens — '
+            'refusing to prune (would deregister this device)');
+        return 0;
+      }
+      if (!devices.any((d) => keep.contains(d.pushToken))) {
+        debugPrint('StreamRingService.pruneOtherDevices: none of keepTokens is '
+            'registered yet — refusing to prune');
+        return 0;
+      }
+
+      var removed = 0;
+      for (final device in devices) {
+        if (keep.contains(device.pushToken)) continue;
+        try {
+          await StreamVideo.instance.removeDevice(pushToken: device.pushToken);
+          removed++;
+          debugPrint('StreamRingService.pruneOtherDevices: removed stale '
+              '${device.pushProvider} device (${device.pushToken.length > 8 ? device.pushToken.substring(0, 8) : device.pushToken}…)');
+        } catch (e) {
+          debugPrint('StreamRingService.pruneOtherDevices: remove failed: $e');
+        }
+      }
+      return removed;
+    } catch (e) {
+      debugPrint('StreamRingService.pruneOtherDevices failed: $e');
+      return 0;
+    }
+  }
+
   /// Subscribes to "ring accepted"; the callback receives the accepted [Call].
   StreamSubscription<ActionCallAccept>? observeAccepted(
     void Function(Call call) onAccept,
@@ -360,8 +425,18 @@ class StreamRingService {
       // when the accepted call ends, so a later ring of the SAME consultation
       // cid (server T-5/T+2 re-ring, mitra "Ring customer") navigates again
       // instead of being silently dropped (#5205).
-      if (!_arming.shouldDeliver(call.id)) return;
+      // ignore: avoid_print
+      print('[RINGDBG] deliver() callId=${call.id} '
+          'armingInFlight=${_arming.debugInFlightCallId}');
+      if (!_arming.shouldDeliver(call.id)) {
+        // ignore: avoid_print
+        print('[RINGDBG] DROPPED by AcceptArming — inFlight='
+            '${_arming.debugInFlightCallId} incoming=${call.id}');
+        return;
+      }
       _watchAcceptedCallEnd(call);
+      // ignore: avoid_print
+      print('[RINGDBG] onAccepted -> host callId=${call.id}');
       onAccepted(call.id);
     }
 
@@ -411,6 +486,8 @@ class StreamRingService {
   void _watchAcceptedCallEnd(Call call) {
     _acceptedCallSub?.cancel();
     _acceptedCallSub = watchCallEnd(call, () {
+      // ignore: avoid_print
+      print('[RINGDBG] accepted call ENDED -> re-arming callId=${call.id}');
       _arming.callEnded(call.id);
       _acceptedCallSub = null;
     });
@@ -499,6 +576,9 @@ class AcceptArming {
 
   /// True while an accept has been delivered but its call hasn't ended yet.
   bool get hasInFlight => _inFlightCallId != null;
+
+  /// Diagnostics only: the latched call id, if any.
+  String? get debugInFlightCallId => _inFlightCallId;
 
   /// Returns true the first time an accept should be delivered; false for a
   /// duplicate report of the in-flight accept (or any accept while one is
