@@ -1,5 +1,6 @@
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mocktail/mocktail.dart';
 import 'package:oit_video_call/src/ring/stream_ring_service.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
 
@@ -181,13 +182,67 @@ void main() {
       });
     });
 
-    test('the production timeout is generous enough for a cold-start mount', () {
-      // Accept → app boot → consultation load → call screen measured a few
-      // seconds on a real device. The timeout only has to bound the leak, so it
-      // must stay well clear of a slow-but-legitimate mount: shortening this
-      // would leave a call the user was about to see.
+    test('the production timeout stays far clear of a slow accept', () {
+      // The two failure directions are NOT symmetric: releasing late leaves
+      // camera and mic held a while longer, releasing early hangs up a call the
+      // user was about to be taken into. And the slow path is not bounded by
+      // this package — both hosts hold ring-accept navigation until home has
+      // loaded, and the consumer's video-call module is an on-demand component
+      // that can stall. Lowering this trades one bug for a worse one.
       expect(StreamRingService.orphanedAcceptTimeout.inSeconds,
-          greaterThanOrEqualTo(30));
+          greaterThanOrEqualTo(120));
+    });
+  });
+
+  group('leaveAcceptedCall — claim guard', () {
+    // The guard exists to stop a future caller pointing this at a call the user
+    // is actually in. `_acceptedCall` and the watchdog are cleared together on
+    // every path EXCEPT a claim, so the line reads as belt-and-braces until you
+    // know that case — which is exactly the shape a refactor deletes.
+    late StreamRingService service;
+
+    setUp(() {
+      service = StreamRingService.instance;
+      addTearDown(service.debugClearAcceptState);
+    });
+
+    _MockCall callWithId(String id) {
+      final call = _MockCall();
+      when(() => call.id).thenReturn(id);
+      // Unstubbed leave() throws; _releaseOrphanedCall swallows it, and the
+      // assertions here are about whether it is REACHED at all.
+      when(call.leave).thenThrow(StateError('no SDK in tests'));
+      return call;
+    }
+
+    test('releases a call the host never claimed', () async {
+      final call = callWithId('order-1');
+      service.debugSetAcceptedCall(call, claimed: false);
+
+      expect(await service.leaveAcceptedCall('order-1'), isTrue);
+      verify(call.leave).called(1);
+    });
+
+    test('REFUSES a call the host has already claimed', () async {
+      final call = callWithId('order-1');
+      service.debugSetAcceptedCall(call, claimed: true);
+
+      expect(
+        await service.leaveAcceptedCall('order-1'),
+        isFalse,
+        reason: 'a claimed call is one the user is in — never hang it up',
+      );
+      verifyNever(call.leave);
+    });
+
+    test('refuses a call id that is not the accepted one', () async {
+      final call = callWithId('order-1');
+      service.debugSetAcceptedCall(call, claimed: false);
+
+      expect(await service.leaveAcceptedCall('order-2'), isFalse);
+      verifyNever(call.leave);
     });
   });
 }
+
+class _MockCall extends Mock implements Call {}

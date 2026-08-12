@@ -105,10 +105,31 @@ class StreamRingService {
   /// screen for it (order fetch failed, route errored, screen crashed) would
   /// otherwise leave the hardware held indefinitely with no UI to release it.
   ///
-  /// Generous on purpose: an accept from a cold start has to boot the app, load
-  /// the consultation and mount the screen. Measured worst case is a few
-  /// seconds, so a minute leaves ample headroom while still bounding the leak.
-  static const Duration orphanedAcceptTimeout = Duration(seconds: 60);
+  /// Deliberately far longer than a healthy accept needs, because the two
+  /// failures are not symmetric: releasing too late leaves camera and mic held a
+  /// while longer, whereas releasing too EARLY hangs up a call the user was
+  /// about to be taken into.
+  ///
+  /// The slow path is longer than it looks. Both host apps hold ring-accept
+  /// navigation until home has finished loading, and the consumer's video-call
+  /// module is a Play on-demand component that has been seen to stall — so
+  /// accept → home-ready → order load → `joinCall` is not bounded by anything
+  /// this package controls. Three minutes still turns an unbounded hold (45
+  /// minutes was observed) into a bounded one, while making a false release
+  /// unlikely enough not to trade one bug for a worse one.
+  ///
+  /// Releasing late is NOT free either, and the third cost scales with this
+  /// constant: while an accept sits unclaimed, its call is SDK-joined, so
+  /// [_inFlightCallIsLive] reads true and a DIFFERENT accept arriving in that
+  /// window takes the `dropInFlightLive` branch — dropped and left. Nothing else
+  /// ends a stalled window (`callEnded` needs `isDisconnected`, which a call
+  /// nobody claimed and nobody left never reports), so this timeout is its only
+  /// terminator. For back-to-back consultations that is the window in which
+  /// accepting the NEXT ring silently hangs it up. Bounded, and far better than
+  /// the process-lifetime latch it replaced, but it is the reason not to raise
+  /// this further: the fix for that cost is to make the drop claim-aware, not to
+  /// stretch the timeout.
+  static const Duration orphanedAcceptTimeout = Duration(seconds: 180);
 
   /// Bounds how long the accepted call may go unclaimed. Resolves the call from
   /// [_acceptedCall] at expiry rather than capturing it, so a superseding accept
@@ -138,14 +159,25 @@ class StreamRingService {
       _claimWatchdog.disarmIfGuarding(callId);
 
   /// Leaves an accepted call the host cannot show, releasing camera and mic.
-  /// Returns false if [callId] is not the currently-accepted call.
+  ///
+  /// Returns false — releasing nothing — in two distinct cases: [callId] is not
+  /// the currently-accepted call, or it IS but the host has already claimed it.
+  /// Callers logging this boolean should not read false as "nothing to release":
+  /// it also covers "refused, correctly".
   ///
   /// For hosts that KNOW they failed — a consultation whose order will not
   /// load, say — this releases immediately instead of waiting out
   /// [orphanedAcceptTimeout].
+  /// Refuses once the host has CLAIMED the call, i.e. a call screen is up for
+  /// it. Without that guard this leaves whatever call is latched, and a claim
+  /// does not clear the latch — so a caller reaching this after a successful
+  /// join would hang up a live conversation. Being unclaimed is the whole
+  /// premise of "the host cannot show it", so requiring it costs nothing: the
+  /// order-failed and screen-gone callers both run before any join.
   Future<bool> leaveAcceptedCall(String callId) async {
     final call = _acceptedCall;
     if (call == null || call.id != callId) return false;
+    if (_claimWatchdog.guardedCallId != callId) return false;
     await _releaseOrphanedCall(call, reason: 'host could not show it');
     return true;
   }
@@ -191,6 +223,26 @@ class StreamRingService {
   /// Test seam for [StreamCallSession] reuse-guard tests.
   @visibleForTesting
   set debugActive(bool value) => _active = value;
+
+  /// Test seam: plants an accepted call and whether the host has claimed it, so
+  /// [leaveAcceptedCall]'s claim guard is assertable without the SDK. Production
+  /// sets both through [wireAcceptHandling].
+  @visibleForTesting
+  void debugSetAcceptedCall(Call call, {required bool claimed}) {
+    _acceptedCall = call;
+    _arming.reset();
+    _arming.decide(call.id, inFlightIsLive: false);
+    _claimWatchdog.arm(call.id);
+    if (claimed) _claimWatchdog.disarmIfGuarding(call.id);
+  }
+
+  /// Test seam: drops accept state and cancels the watchdog timer.
+  @visibleForTesting
+  void debugClearAcceptState() {
+    _acceptedCall = null;
+    _claimWatchdog.reset();
+    _arming.reset();
+  }
 
   /// Constructs the long-lived [StreamVideo] with the official push manager
   /// and connects (registering the device for call pushes). Idempotent, and
