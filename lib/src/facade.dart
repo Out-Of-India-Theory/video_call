@@ -218,8 +218,11 @@ class OitVideoCall {
   ///    so refusing is what stops this hanging up a live conversation.
   ///
   /// Hosts logging this boolean should not read false as "nothing to release" —
-  /// it also covers "refused, correctly". Only `true` means camera and mic were
-  /// actually freed by this call.
+  /// it also covers "refused, correctly". Nor is `true` a receipt for the
+  /// hardware: it means the latch was dropped and a leave was ATTEMPTED. The
+  /// leave itself is best effort and still reports true if it fails or hangs, so
+  /// a host that needs to know the difference should record the attempt before
+  /// awaiting this and the outcome after.
   ///
   /// Accept handling joins the call BEFORE [wireRingAccept]'s callback runs, so
   /// camera and mic are already live by the time the host decides where to
