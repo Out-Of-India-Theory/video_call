@@ -208,8 +208,18 @@ class OitVideoCall {
     StreamRingService.instance.wireAcceptHandling(onAccepted);
   }
 
-  /// Leaves a ring-accepted call the host cannot show, releasing camera and
-  /// mic. Returns false if [callId] is not the currently-accepted call.
+  /// Leaves a ring-accepted call the host cannot show, releasing camera and mic.
+  ///
+  /// Returns false — having released nothing — in two distinct cases:
+  ///
+  /// 1. [callId] is not the currently-accepted call (a superseded accept, or a
+  ///    latch already cleared).
+  /// 2. It IS, but the host has already CLAIMED it: a call screen is up for it,
+  ///    so refusing is what stops this hanging up a live conversation.
+  ///
+  /// Hosts logging this boolean should not read false as "nothing to release" —
+  /// it also covers "refused, correctly". Only `true` means camera and mic were
+  /// actually freed by this call.
   ///
   /// Accept handling joins the call BEFORE [wireRingAccept]'s callback runs, so
   /// camera and mic are already live by the time the host decides where to
