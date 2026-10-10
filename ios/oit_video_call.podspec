@@ -13,7 +13,7 @@ OIT shared Flutter plugin wrapping Stream Video for Dharmayana apps.
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Out of India Theory' => 'engineering@the-oit.in' }
   s.source           = { :path => '.' }
-  s.source_files = 'Classes/**/*'
+  s.source_files = 'oit_video_call/Sources/oit_video_call/**/*.swift'
   s.dependency 'Flutter'
   s.platform = :ios, '13.0'
 
@@ -25,5 +25,5 @@ OIT shared Flutter plugin wrapping Stream Video for Dharmayana apps.
   # required reason APIs, update the PrivacyInfo.xcprivacy file to describe your
   # plugin's privacy impact, and then uncomment this line. For more information,
   # see https://developer.apple.com/documentation/bundleresources/privacy_manifest_files
-  # s.resource_bundles = {'oit_video_call_privacy' => ['Resources/PrivacyInfo.xcprivacy']}
+  # s.resource_bundles = {'oit_video_call_privacy' => ['oit_video_call/Sources/oit_video_call/PrivacyInfo.xcprivacy']}
 end
